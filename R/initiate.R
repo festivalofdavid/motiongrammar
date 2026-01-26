@@ -8,7 +8,8 @@
 #' @param verbose Logical; if TRUE, prints status messages to the console.
 #' @return A list of updated tokens.
 #' @keywords internal
-get_valid_tokens <- function(tokens, verbose = TRUE) {
+get_valid_tokens <- function(tokens, 
+                            verbose = TRUE) {
   now <- as.integer(Sys.time())
   
   if (!is.null(tokens$expires_at) && (tokens$expires_at - now) > 120) {
@@ -53,7 +54,9 @@ get_valid_tokens <- function(tokens, verbose = TRUE) {
 #' @param start_time_iso Character; ISO 8601 start date of the activity.
 #' @return A tibble with columns: unix_time, lat, lng, altitude.
 #' @keywords internal
-get_physics_streams <- function(activity_id, access_token, start_time_iso) {
+get_physics_streams <- function(activity_id, 
+                               access_token, 
+                               start_time_iso) {
   
   stream_types <- 'time,latlng,altitude'
   url <- paste0('https://www.strava.com/api/v3/activities/', 
@@ -91,14 +94,13 @@ get_physics_streams <- function(activity_id, access_token, start_time_iso) {
 
 # segment name: initiate ---
 
-#' Initiate a Motion Grammar Session
+#' Initiate a motiongrammar pipe
 #' 
-#' This is the entry point for importing activity data. It handles authentication,
-#' metadata retrieval, and stream processing.
+#' Load in our actual tracking data -- first step in any motiongrammar pipeline
 #' 
 #' @param source Character; the data provider (currently only 'strava').
 #' @param session Character; the Strava activity ID or full URL. 
-#'   Defaults to a specific Central Park session ('17134112147').
+#'   Defaults to my run around central park
 #' @param verbose Logical; if TRUE, prints a summary of the activity to the console.
 #' @return An object of class \code{motion_trace} (a tibble with activity metadata attached).
 #' @export
@@ -125,7 +127,9 @@ initiate <- function(source = 'strava',
     
     # 1. Load tokens
     token_path <- path.expand('~/strava_tokens.json')
-    if (!file.exists(token_path)) stop('Token file not found at ~/strava_tokens.json')
+    if (!file.exists(token_path)) {
+      stop('Token file not found at ~/strava_tokens.json')
+    }
     
     raw_tokens <- jsonlite::fromJSON(token_path, simplifyVector = TRUE)
     tokens     <- get_valid_tokens(raw_tokens, verbose = verbose)
