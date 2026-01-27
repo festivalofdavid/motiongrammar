@@ -9,12 +9,12 @@ get_valid_tokens(tokens, verbose = TRUE)
 \arguments{
 \item{tokens}{A list containing client_id, client_secret, refresh_token, and access_token.}
 
-\item{verbose}{Logical; if TRUE, prints status messages to the console.}
+\item{verbose}{Logical; if TRUE, prints status messages.}
 }
 \value{
 A list of updated tokens.
 }
 \description{
-Internal helper to check token expiry and refresh via OAuth2 if necessary.
+Refresh Strava API Tokens
 }
 \keyword{internal}

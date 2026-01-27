@@ -7,22 +7,15 @@
 initiate(source = "strava", session = "17134112147", verbose = TRUE)
 }
 \arguments{
-\item{source}{Character; the data provider (currently only 'strava').}
+\item{source}{Character; the data provider ('strava' or 'catapult_replay').}
 
-\item{session}{Character; the Strava activity ID or full URL.
-Defaults to a specific Central Park session ('17134112147').}
+\item{session}{Character; the Strava ID/URL or local file path.}
 
-\item{verbose}{Logical; if TRUE, prints a summary of the activity to the console.}
+\item{verbose}{Logical; if TRUE, prints a summary.}
 }
 \value{
-An object of class \code{motion_trace} (a tibble with activity metadata attached).
+An object of class \code{motion_trace}.
 }
 \description{
-This is the entry point for importing activity data. It handles authentication,
-metadata retrieval, and stream processing.
-}
-\examples{
-\dontrun{
-trace <- initiate(session = '17134112147')
-}
+Initiate a Motion Grammar Session
 }

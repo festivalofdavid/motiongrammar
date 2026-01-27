@@ -7,16 +7,13 @@
 get_physics_streams(activity_id, access_token, start_time_iso)
 }
 \arguments{
-\item{activity_id}{Character; the numeric Strava activity ID.}
+\item{activity_id}{Character; the Strava activity ID.}
 
 \item{access_token}{Character; valid OAuth2 access token.}
 
-\item{start_time_iso}{Character; ISO 8601 start date of the activity.}
-}
-\value{
-A tibble with columns: unix_time, lat, lng, altitude.
+\item{start_time_iso}{Character; ISO 8601 start date.}
 }
 \description{
-Retrieves time-series data (lat/lng, altitude, time) for a specific activity.
+Fetch Physics Streams from Strava
 }
 \keyword{internal}
