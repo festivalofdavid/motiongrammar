@@ -1,0 +1,143 @@
+# segment name: setup ---
+require('tidyverse')
+require('changepoint')
+require('zoo')
+
+
+process_final_trace <- function(.data, v_threshold = 2.0, min_pts = 100) {
+
+  m_pelt <- changepoint::cpt.meanvar(
+    data    = .data$velocity, 
+    method  = 'PELT', 
+    penalty   = 'Manual',
+  pen.value = 5
+  )
+  
+  processed <- .data |>
+    dplyr::mutate(
+      pelt_id = findInterval(dplyr::row_number(), c(0, changepoint::cpts(m_pelt)))
+    ) |>
+    dplyr::group_by(pelt_id) |>
+    dplyr::mutate(
+      # The core physical rule: is this specific block downtime?
+      is_downtime = mean(velocity, na.rm = TRUE) < v_threshold
+    ) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(
+      type_group_id = dplyr::consecutive_id(is_downtime)
+    )
+  
+  refined <- processed |>
+    dplyr::group_by(type_group_id) |>
+    dplyr::mutate(segment_size = dplyr::n()) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(
+      # If too small, it loses its ID to be merged
+      refined_id = ifelse(segment_size < min_pts, NA_real_, as.numeric(type_group_id)),
+      # Fill NAs using the nearest valid neighbour
+      refined_id = zoo::na.locf(refined_id, na.rm = FALSE),
+      refined_id = tidyr::replace_na(refined_id, 1)
+    ) |>
+    # 4. Final Semantic Labelling
+    dplyr::group_by(refined_id) |>
+    dplyr::mutate(
+      final_mean = mean(velocity, na.rm = TRUE),
+      is_static_final = final_mean < v_threshold
+    ) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(
+      label_prefix = ifelse(is_static_final, 'downtime_', 'active_'),
+      section_label = paste0(label_prefix, dplyr::consecutive_id(refined_id))
+    )
+  
+  return(refined)
+}
+
+visualise_motion_audit <- function(.data) {
+  
+  # Calculate global max for label placement to avoid layer errors
+  y_top <- max(.data$velocity, na.rm = TRUE)
+  
+  # Summary for the background 'regime' shading and labels
+  section_highlights <- .data |>
+    dplyr::group_by(section_label) |>
+    dplyr::summarise(
+      start_time = min(unix_time),
+      end_time   = max(unix_time),
+      mid_time   = median(unix_time),
+      is_downtime = first(is_static_final),
+      .groups    = 'drop'
+    )
+
+  ggplot(.data) +
+    geom_rect(
+      data = section_highlights,
+      aes(
+        xmin = start_time, xmax = end_time, 
+        ymin = -Inf, ymax = Inf, 
+        fill = section_label
+      ),
+      alpha = 0.15
+    ) +
+    geom_line(
+      aes(x = unix_time, y = velocity), 
+      colour = 'grey10', 
+      linewidth = 0.4
+    ) +
+    geom_point(
+      data = .data |> dplyr::filter(is_interpolated == TRUE),
+      aes(x = unix_time, y = velocity),
+      colour = '#d90429', 
+      size = 0.7, 
+      alpha = 0.5
+    ) +
+    geom_text(
+      data = section_highlights |> dplyr::filter(!is_downtime),
+      aes(x = mid_time, y = y_top * 0.9, label = section_label),
+      size = 3.5, 
+      fontface = 'bold', 
+      angle = 90, 
+      vjust = 1.2,
+      colour = 'grey30'
+    ) +
+    scale_fill_viridis_d(option = 'turbo', guide = 'none') +
+    theme_minimal(base_size = 12) +
+    labs(
+      title = 'Motion Grammar: Segmentation Audit',
+      subtitle = 'Shaded areas show detected regimes; Red points indicate interpolated data',
+      x = 'Unix Time',
+      y = 'Velocity (m/s)',
+      caption = 'Note: red dots = interpolated TRUE'
+    ) +
+    theme(
+      panel.grid.minor = element_blank(),
+      plot.title = element_text(face = 'bold')
+    )
+}
+
+clean_data <- initiate(source = 'catapult_replay',
+session = '/Users/david/Downloads/Adams_25_50657_13_10_09_.csv',
+verbose = FALSE) |> 
+  coordinate(norm = TRUE) |> 
+  interpolate(max_gap_frames = 20) |> 
+  filtrate() |> 
+  derivate(window = 5) |> 
+  dplyr::filter(is.finite(velocity))
+
+final_output <- process_final_trace(
+  clean_data, 
+  v_threshold = 1, 
+  min_pts = 300
+)
+
+# Assuming final_output is your processed tibble
+visualise_motion_audit(final_output)
+
+final_output <- initiate(source = 'catapult_replay',
+session = '/Users/david/Downloads/Adams_25_50657_13_10_09_.csv',
+verbose = FALSE) |> 
+  coordinate(norm = TRUE) |> 
+  interpolate(max_gap_frames = 20) |> 
+  filtrate() |> 
+  derivate(window = 5) |> 
+  curate()
