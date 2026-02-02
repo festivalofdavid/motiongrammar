@@ -9,17 +9,18 @@ verbose = FALSE) |>
   interpolate(max_gap_frames = 20) |> 
   filtrate() |> 
   derivate(window = 5) |> 
-  curate()
+  designate()
 
-visualise_motion_audit(gps_test)
+visualise_motion_audit(strava_test)
 
 
 ## Test on my strava defaults
 strava_test <- initiate(verbose = FALSE) |> 
   coordinate(norm = TRUE) |> 
+  interpolate() |> 
   filtrate() |> 
   derivate(window = 5) |> 
-  glimpse()
+  designate()
 
 strava_test |> 
   filter(velocity < 10) |> 

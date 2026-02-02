@@ -1,13 +1,13 @@
-# segment name: allocate_logic ---
-#' allocate Motion Data
+# segment name: designate_logic ---
+#' designate Motion Data
 #' @description Finalises segmentation using statistical masking and type-safe combining.
 #' @param .data Tibble with 'velocity', 'unix_time', and 'is_interpolated'.
 #' @param v_threshold Velocity (m/s) to distinguish active vs downtime.
 #' @param min_pts Minimum segment length (e.g., 300 pts = 30s at 10Hz).
-allocate <- function(method = 'corbett',
-  .data, 
+designate <- function(.data, 
   v_threshold = 1, 
-  min_pts = 300
+  min_pts = 300,
+  method = 'corbett'
 ) {
   
   if(method == 'corbett'){
@@ -18,7 +18,7 @@ allocate <- function(method = 'corbett',
     )
   
   if (nrow(.data) == 0) {
-    stop('allocate(): no finite velocity values left after filtering.')
+    stop('designate(): no finite velocity values left after filtering.')
   }
   
   # 2. Get PELT statistical bounds

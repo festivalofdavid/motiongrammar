@@ -4,7 +4,7 @@
 \alias{designate}
 \title{designate Motion Data}
 \usage{
-designate(.data, v_threshold = 1, min_pts = 300)
+designate(.data, v_threshold = 1, min_pts = 300, method = "corbett")
 }
 \arguments{
 \item{.data}{Tibble with 'velocity', 'unix_time', and 'is_interpolated'.}

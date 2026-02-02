@@ -130,14 +130,16 @@ final_output <- process_final_trace(
   min_pts = 300
 )
 
-# Assuming final_output is your processed tibble
-visualise_motion_audit(final_output)
-
-final_output <- initiate(source = 'catapult_replay',
+gps_test <- initiate(source = 'catapult_replay',
 session = '/Users/david/Downloads/Adams_25_50657_13_10_09_.csv',
 verbose = FALSE) |> 
   coordinate(norm = TRUE) |> 
   interpolate(max_gap_frames = 20) |> 
   filtrate() |> 
   derivate(window = 5) |> 
-  curate()
+  designate()
+
+
+# Assuming final_output is your processed tibble
+visualise_motion_audit(strava_test)
+visualise_motion_audit(gps_test)
