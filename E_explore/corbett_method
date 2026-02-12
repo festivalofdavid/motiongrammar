@@ -143,3 +143,6 @@ verbose = FALSE) |>
 # Assuming final_output is your processed tibble
 visualise_motion_audit(strava_test)
 visualise_motion_audit(gps_test)
+
+
+glimpse(strava_test)

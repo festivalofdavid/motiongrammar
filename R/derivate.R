@@ -41,7 +41,8 @@
     dplyr::select(-dx, -dy, -rad_diff, -heading_rad) |>
     dplyr::mutate(
       dplyr::across(c(velocity, angular_velocity), ~tidyr::replace_na(., 0))
-    )
+    ) |> 
+    dplyr::mutate(angular_velocity = abs(angular_velocity))
   
   return(output)
 }

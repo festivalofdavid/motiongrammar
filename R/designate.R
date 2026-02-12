@@ -75,7 +75,8 @@ designate <- function(.data,
         label_prefix, 
         dplyr::consecutive_id(refined_id)
       )
-    )
+    ) |> 
+    select(-pelt_id:-label_prefix)
   }
   
   return(refined)
