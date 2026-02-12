@@ -414,7 +414,7 @@ initiate <- function(source = 'strava',
           lng      = 3
         ) |>
         dplyr::mutate(
-          unix_time = unix_raw / 100, 
+          unix_time = unix_raw, 
           altitude  = NA_real_
         ) |>
         dplyr::select(unix_time, lat, lng, altitude)
@@ -453,8 +453,53 @@ initiate <- function(source = 'strava',
     stop("Unknown source. Use 'strava', 'catapult_replay', 'guess_csv', or 'guess_json'.")
   )
   
+  trace <- trace |>
+    dplyr::mutate(unix_time = norm_unix(unix_time))
+  
   class(trace) <- c('motion_trace', class(trace))
   if (verbose) print(trace)
   
   return(trace)
+}
+
+#' Normalise Unix Timestamps to Standard Format
+#' @description Detects and corrects non-standard Unix timestamp formats
+#' (e.g., milliseconds, centiseconds) to standard seconds since epoch.
+#' @param unix_vec Numeric vector of Unix timestamps
+#' @return Numeric vector of normalised Unix timestamps in seconds
+#' @keywords internal
+norm_unix <- function(unix_vec) {
+  
+  # Remove NAs for analysis
+  valid_times <- unix_vec[!is.na(unix_vec)]
+  
+  if (length(valid_times) == 0) {
+    return(unix_vec)  # All NA, return as-is
+  }
+  
+  # Get median value to determine scale
+  median_time <- median(valid_times, na.rm = TRUE)
+  
+  # Standard Unix time ranges (as of 2026):
+  # - Seconds: ~1.7 billion (10 digits)
+  # - Milliseconds: ~1.7 trillion (13 digits) 
+  # - Centiseconds: ~170 billion (11-12 digits)
+  
+  # Count digits in median value
+  digits <- floor(log10(abs(median_time))) + 1
+  
+  if (digits == 13) {
+    # Milliseconds - divide by 1000
+    return(unix_vec / 1000)
+  } else if (digits == 11 || digits == 12) {
+    # Centiseconds (Catapult format) - divide by 100
+    return(unix_vec / 100)
+  } else if (digits == 9 || digits == 10) {
+    # Already in seconds - return as-is
+    return(unix_vec)
+  } else {
+    # Unexpected format - warn but return as-is
+    warning(sprintf("Unexpected unix_time format (%d digits). Expected 9-13 digits. Returning unchanged.", digits))
+    return(unix_vec)
+  }
 }

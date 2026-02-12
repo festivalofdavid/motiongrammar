@@ -6,8 +6,6 @@ devtools::load_all()
 gps_test2 <- initiate(source = 'guess_csv',
 session = '/Users/david/Downloads/Adams_25_50657_13_10_09_.csv',
 verbose = FALSE) |> 
-glimpse()
-  
   coordinate(norm = TRUE) |> 
   interpolate(max_gap_frames = 25) |> 
   filtrate() |> 
@@ -25,6 +23,9 @@ glimpse()
 
 
 
+### Comparison work
+gps_test <- initiate(source = 'catapult_replay',
+session = '/Users/david/Downloads/Adams_25_50657_13_10_09_.csv')
 
-test5 <- initiate(source = 'guess_csv',
-session = '/Users/david/Downloads/Adams_25_50657_13_10_09_.csv' )
+gps_test2 <- initiate(source = 'guess_csv',
+session = '/Users/david/Downloads/Adams_25_50657_13_10_09_.csv')
