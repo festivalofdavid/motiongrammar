@@ -11,10 +11,10 @@ quantitate(.data, allocation = "p1", designation = "section", ...)
 
 \item{allocation}{The prefix string used in allocate() (e.g., 'match', 'p1').}
 
-\item{designation}{The grouping level: 'section', 'active', or 'session'.}
+\item{designation}{The context level: 'section' or 'active'.}
 
 \item{...}{Expressions to pass to dplyr::summarise().}
 }
 \description{
-A flexible wrapper for summarise that respects designation and allocation logic.
+A lens-based aggregator that groups by both designation and allocation.
 }
