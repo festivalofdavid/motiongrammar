@@ -4,7 +4,7 @@
 \alias{initiate_guess_csv}
 \title{Auto-Detect and Parse Messy CSV Files}
 \usage{
-initiate_guess_csv(.data_path, source = "gps", confidence_threshold = 0.8)
+initiate_guess_csv(.data_path, source = "gps", confidence_threshold = 0.7)
 }
 \arguments{
 \item{.data_path}{String. Path to the CSV file.}

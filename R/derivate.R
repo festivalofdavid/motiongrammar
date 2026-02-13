@@ -30,17 +30,25 @@ derivate <- function(.data, use_filtered = TRUE, window = 5){
       dy = .data[[y_col]] - dplyr::lag(.data[[y_col]], n = window),
       # Calculate distance before deriving velocity
       distance = sqrt(dx^2 + dy^2),
-      # Get a vector of direction/heading
-      heading_rad = atan2(dy, dx),
-      # Change in heading over k wndow
-      rad_diff = (heading_rad - dplyr::lag(heading_rad, n = window) + pi) %% (2 * pi) - pi,
-      # we don't want radians realistically  so let's just convert it to degrees
-      angular_velocity = (rad_diff * (180 / pi)) / dt,
       # linear velocity in same window
       velocity = distance / dt,
-      acceleration = (velocity - dplyr::lag(velocity, n = window)) / dt ) |>
+      # velocity components (needed for angular velocity)
+      vx = dx / dt,
+      vy = dy / dt,
+      # heading  
+      heading = atan2(vy, vx) * 180 / pi,
+      # Angular velocity using cross product method
+      vx_lag = dplyr::lag(vx),
+      vy_lag = dplyr::lag(vy),
+      cross_z = vx_lag * vy - vy_lag * vx,
+      dot_prod = vx_lag * vx + vy_lag * vy,
+      angular_velocity = atan2(cross_z, dot_prod) / dt, # radians sec
+      angular_velocity = (atan2(cross_z, dot_prod) / dt) * (180 / pi),  # degrees/sec #
+      # acceleration
+      acceleration = (velocity - dplyr::lag(velocity, n = window)) / dt
+    ) |>
     # Clean up temp columns
-    dplyr::select(-dx, -dy, -rad_diff, -heading_rad) |>
+    dplyr::select(-dx, -dy, -vx, -vy, -vx_lag, -vy_lag, -cross_z, -dot_prod) |>
     dplyr::mutate(
       dplyr::across(c(distance, velocity, angular_velocity), ~tidyr::replace_na(., 0))
     ) |> 

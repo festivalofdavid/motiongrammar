@@ -204,10 +204,10 @@ initiate_guess_csv <- function(.data_path,
   # Set some explicit targets for later fuzzy matching
   if (source == "gps") {
     targets <- list(
-      unix_time = list(
-        primary = c('unix', 'timestamp', 'unixtime', 'time_ms', 'utc'),
-        fallback = c('time', 'datetime', 'date', 'epoch')
-      ),
+            unix_time = list(
+            primary = c('unix', 'timestamp', 'unixtime', 'time_ms', 'utc', 'epoch'),
+            fallback = c('time', 'datetime', 'date', 'frame', 'frameid', 'frame_id', 'frame_number')
+          ),
       lat = list(
         primary = c('latitude', 'lat'),
         fallback = c('y', 'coord_y', 'lat_deg')
@@ -308,13 +308,19 @@ initiate_guess_csv <- function(.data_path,
     }
   }
   
-  # to numeric
-  for (col in output_cols) {
-    if (col %in% colnames(df)) {
-      df <- df |> 
-        dplyr::mutate(!!col := suppressWarnings(as.numeric(.data[[col]])))
-    }
+if ('unix_time' %in% colnames(df)) {
+  df <- df |> 
+    dplyr::mutate(unix_time = convert_to_unix(unix_time))
+}
+
+# Convert other columns to numeric
+other_cols <- setdiff(output_cols, 'unix_time')
+for (col in other_cols) {
+  if (col %in% colnames(df)) {
+    df <- df |> 
+      dplyr::mutate(!!col := suppressWarnings(as.numeric(.data[[col]])))
   }
+}
   
   # Select only the columns we need
   output <- df |>
@@ -344,6 +350,206 @@ initiate_guess_csv <- function(.data_path,
   return(output)
 }
 
+# segment name: helpers ---
+
+#' Null Coalescing Operator
+#' @keywords internal
+`%||%` <- function(a, b) {
+  if (is.null(a)) b else a
+}
+
+#' Create Metadata Attribute for Motion Trace
+#' @description Internal helper to initialize metadata structure
+#' @param session File path or session identifier
+#' @param source Data source type ('strava', 'gpx', 'fit', etc.)
+#' @param device_info Optional list with device details (auto-extracted if available)
+#' @param coord_system Coordinate system ('gps' for lat/lng, 'local' for xy)
+#' @keywords internal
+create_metadata <- function(session, 
+                           source, 
+                           device_info = NULL,
+                           coord_system = 'gps') {
+  
+  # Extract session name from file path or ID
+  session_name <- if (file.exists(session)) {
+    basename(session)
+  } else {
+    as.character(session)
+  }
+  
+  # Try to extract date from filename
+  date_from_name <- tryCatch({
+    date_patterns <- c(
+      "\\d{4}-\\d{2}-\\d{2}",  # 2024-03-27
+      "\\d{8}",                 # 20240327
+      "\\d{2}-\\d{2}-\\d{4}"   # 27-03-2024
+    )
+    
+    for (pattern in date_patterns) {
+      match <- stringr::str_extract(session_name, pattern)
+      if (!is.na(match)) {
+        parsed <- lubridate::parse_date_time(match, orders = c('ymd', 'dmy'))
+        if (!is.na(parsed)) return(as.Date(parsed))
+      }
+    }
+    NA
+  }, error = function(e) NA)
+  
+  # Get package version safely
+  pkg_version <- tryCatch(
+    as.character(utils::packageVersion('motionGrammar')),
+    error = function(e) 'dev'
+  )
+  
+  # Build metadata structure
+  metadata <- list(
+    # Session identification
+    name = session_name,
+    source = source,
+    session_id = NA_character_,
+    
+    # Athlete information
+    player_id = NA_character_,
+    player_name = NA_character_,
+    team = NA_character_,
+    
+    # Device information
+    device_type = if(!is.null(device_info$type)) device_info$type else NA_character_,
+    device_id = if(!is.null(device_info$id)) device_info$id else NA_character_,
+    device_manufacturer = if(!is.null(device_info$manufacturer)) device_info$manufacturer else NA_character_,
+    firmware_version = if(!is.null(device_info$firmware)) device_info$firmware else NA_character_,
+    
+    # Session context
+    sport = NA_character_,
+    session_type = NA_character_,
+    session_start = date_from_name,
+    session_duration_sec = NA_real_,
+    
+    # Technical details
+    coordinate_system = coord_system,
+    
+    # Processing metadata
+    created_timestamp = Sys.time(),
+    created_by = 'motionGrammar',
+    package_version = pkg_version
+  )
+  
+  return(metadata)
+}
+
+#' Update Metadata Fields
+#' @description Allows users to add or modify metadata after creating a motion_trace
+#' @param .data A motion_trace object
+#' @param ... Named arguments to update in metadata
+#' @return Motion trace with updated metadata
+#' @export
+#' @examples
+#' trace <- initiate(...) |>
+#'   set_metadata(
+#'     player_id = "P001",
+#'     player_name = "John Smith",
+#'     sport = "football"
+#'   )
+set_metadata <- function(.data, ...) {
+  
+  if (!inherits(.data, 'motion_trace')) {
+    stop("Input must be a motion_trace object")
+  }
+  
+  meta <- attr(.data, 'metadata')
+  
+  if (is.null(meta)) {
+    warning("No metadata found. Creating new metadata structure.")
+    meta <- list()
+  }
+  
+  # Get new metadata from ...
+  new_meta <- list(...)
+  
+  # Update existing metadata
+  for (key in names(new_meta)) {
+    meta[[key]] <- new_meta[[key]]
+  }
+  
+  attr(.data, 'metadata') <- meta
+  return(.data)
+}
+
+#' Normalise Unix Timestamps to Standard Format
+#' @description Detects and corrects non-standard Unix timestamp formats
+#' @param unix_vec Numeric vector of Unix timestamps
+#' @return Numeric vector of normalised Unix timestamps in seconds
+#' @keywords internal
+norm_unix <- function(unix_vec) {
+  
+  valid_times <- unix_vec[!is.na(unix_vec)]
+  
+  if (length(valid_times) == 0) {
+    return(unix_vec)
+  }
+  
+  median_time <- median(valid_times, na.rm = TRUE)
+  digits <- floor(log10(abs(median_time))) + 1
+  
+  if (digits == 13) {
+    return(unix_vec / 1000)  # Milliseconds
+  } else if (digits == 11 || digits == 12) {
+    return(unix_vec / 100)   # Centiseconds
+  } else if (digits == 9 || digits == 10) {
+    return(unix_vec)         # Already in seconds
+  } else {
+    warning(sprintf("Unexpected unix_time format (%d digits). Expected 9-13 digits. Returning unchanged.", digits))
+    return(unix_vec)
+  }
+}
+
+#' Convert Time Column to Unix Time
+#' @description Converts various time formats to Unix time
+#' @param time_vec Vector that might be Unix time, datetime, or frame IDs
+#' @return Numeric vector in Unix time format (or frame IDs if that's all we have)
+#' @keywords internal
+convert_to_unix <- function(time_vec) {
+  
+  valid_times <- time_vec[!is.na(time_vec)]
+  
+  if (length(valid_times) == 0) {
+    return(as.numeric(time_vec))
+  }
+  
+  # Try converting to numeric first
+  numeric_vec <- suppressWarnings(as.numeric(time_vec))
+  
+  # Check if conversion worked
+  if (sum(!is.na(numeric_vec)) > length(valid_times) * 0.8) {
+    valid_numeric <- numeric_vec[!is.na(numeric_vec)]
+    median_val <- median(valid_numeric, na.rm = TRUE)
+    
+    if (median_val > 100000) {
+      return(norm_unix(numeric_vec))  # Unix time
+    } else {
+      return(numeric_vec)  # Frame IDs
+    }
+  }
+  
+  # Try parsing as datetime
+  tryCatch({
+    parsed <- lubridate::parse_date_time(time_vec, 
+                                          orders = c("ymd HMS", "dmy HMS", "mdy HMS",
+                                                    "ymd HM", "dmy HM", "mdy HM",
+                                                    "ymd", "dmy", "mdy"))
+    unix_time <- as.numeric(parsed)
+    
+    if (sum(!is.na(unix_time)) > length(valid_times) * 0.5) {
+      return(unix_time)
+    } else {
+      warning("Could not parse time column as datetime. Returning as numeric.")
+      return(as.numeric(time_vec))
+    }
+  }, error = function(e) {
+    warning(sprintf("Time conversion failed: %s. Using numeric conversion.", e$message))
+    return(as.numeric(time_vec))
+  })
+}
 
 # segment name: initiate ---
 
@@ -351,7 +557,7 @@ initiate_guess_csv <- function(.data_path,
 #' 
 #' @param source Character; the data provider ('strava', 'catapult_replay', 'guess_csv', or 'guess_json').
 #' @param session Character; the Strava ID/URL or local file path.
-#' @param coord_system Character; for 'guess_*' modes: 'gps' (default), 'local', or 'auto'.
+#' @param coord_system Character; for 'guess_csv' mode: 'gps' (default) or 'local'.
 #' @param verbose Logical; if TRUE, prints a summary.
 #' @return An object of class \code{motion_trace}.
 #' @export
@@ -381,10 +587,21 @@ initiate <- function(source = 'strava',
       
       trace <- get_physics_streams(activity_id, tokens$access_token, meta$start_date)
       
-      attr(trace, 'metadata') <- list(
-        name = meta$name, 
-        source = 'strava'
+      # Create metadata with Strava-specific overrides
+      metadata <- create_metadata(
+        session = activity_id,
+        source = 'strava',
+        device_info = NULL,
+        coord_system = 'gps'
       )
+      
+      metadata$session_id <- activity_id
+      metadata$name <- meta$name
+      metadata$session_start <- as.Date(lubridate::as_datetime(meta$start_date))
+      metadata$session_duration_sec <- meta$elapsed_time %||% NA
+      metadata$sport <- meta$sport_type %||% NA
+      
+      attr(trace, 'metadata') <- metadata
       trace
     },
     
@@ -414,17 +631,35 @@ initiate <- function(source = 'strava',
           lng      = 3
         ) |>
         dplyr::mutate(
-          unix_time = unix_raw, 
+          unix_time = convert_to_unix(unix_raw),
           altitude  = NA_real_
         ) |>
         dplyr::select(unix_time, lat, lng, altitude)
       
+      # Extract start time from Catapult metadata
       start_line <- all_lines[grep('StartTimeSeconds', all_lines)]
-      attr(trace, 'metadata') <- list(
-        name = basename(session), 
+      start_time_raw <- stringr::str_extract(start_line, '(?<=StartTimeSeconds ).*')
+      
+      # Create metadata
+      metadata <- create_metadata(
+        session = session,
         source = 'catapult_replay',
-        start_time_raw = stringr::str_extract(start_line, '(?<=StartTimeSeconds ).*')
+        device_info = list(type = 'Catapult'),
+        coord_system = 'gps'
       )
+      
+      # Try to parse Catapult start time
+      if (length(start_time_raw) > 0 && !is.na(start_time_raw[1])) {
+        parsed_start <- tryCatch({
+          lubridate::parse_date_time(start_time_raw[1], orders = c('dmy HMS', 'mdy HMS'))
+        }, error = function(e) NA)
+        
+        if (!is.na(parsed_start)) {
+          metadata$session_start <- as.Date(parsed_start)
+        }
+      }
+      
+      attr(trace, 'metadata') <- metadata
       trace
     },
     
@@ -433,73 +668,27 @@ initiate <- function(source = 'strava',
       
       trace <- initiate_guess_csv(session, source = coord_system)
       
-      attr(trace, 'metadata') <- list(
-        name = basename(session), 
-        source = 'guess_csv'
+      # Create metadata
+      attr(trace, 'metadata') <- create_metadata(
+        session = session,
+        source = 'guess_csv',
+        device_info = NULL,
+        coord_system = coord_system
       )
+      
       trace
     },
     
     'guess_json' = {
       if (!file.exists(session)) stop('File not found.')
-      
-      # PLACEHOLDER ---
       stop('JSON parsing not yet implemented. Use source = "guess_csv" for CSV files.')
-      
-      # Placeholder here since I haven't workd out json files yet.
-
     },
     
     stop("Unknown source. Use 'strava', 'catapult_replay', 'guess_csv', or 'guess_json'.")
   )
   
-  trace <- trace |>
-    dplyr::mutate(unix_time = norm_unix(unix_time))
-  
   class(trace) <- c('motion_trace', class(trace))
   if (verbose) print(trace)
   
   return(trace)
-}
-
-#' Normalise Unix Timestamps to Standard Format
-#' @description Detects and corrects non-standard Unix timestamp formats
-#' (e.g., milliseconds, centiseconds) to standard seconds since epoch.
-#' @param unix_vec Numeric vector of Unix timestamps
-#' @return Numeric vector of normalised Unix timestamps in seconds
-#' @keywords internal
-norm_unix <- function(unix_vec) {
-  
-  # Remove NAs for analysis
-  valid_times <- unix_vec[!is.na(unix_vec)]
-  
-  if (length(valid_times) == 0) {
-    return(unix_vec)  # All NA, return as-is
-  }
-  
-  # Get median value to determine scale
-  median_time <- median(valid_times, na.rm = TRUE)
-  
-  # Standard Unix time ranges (as of 2026):
-  # - Seconds: ~1.7 billion (10 digits)
-  # - Milliseconds: ~1.7 trillion (13 digits) 
-  # - Centiseconds: ~170 billion (11-12 digits)
-  
-  # Count digits in median value
-  digits <- floor(log10(abs(median_time))) + 1
-  
-  if (digits == 13) {
-    # Milliseconds - divide by 1000
-    return(unix_vec / 1000)
-  } else if (digits == 11 || digits == 12) {
-    # Centiseconds (Catapult format) - divide by 100
-    return(unix_vec / 100)
-  } else if (digits == 9 || digits == 10) {
-    # Already in seconds - return as-is
-    return(unix_vec)
-  } else {
-    # Unexpected format - warn but return as-is
-    warning(sprintf("Unexpected unix_time format (%d digits). Expected 9-13 digits. Returning unchanged.", digits))
-    return(unix_vec)
-  }
 }

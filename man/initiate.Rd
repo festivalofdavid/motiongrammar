@@ -8,20 +8,17 @@ initiate(
   source = "strava",
   session = "17134112147",
   coord_system = "gps",
-  verbose = TRUE,
-  ...
+  verbose = TRUE
 )
 }
 \arguments{
-\item{source}{Character; the data provider ('strava', 'catapult_replay', 'guess_csv', 'manual_csv', or 'guess_json').}
+\item{source}{Character; the data provider ('strava', 'catapult_replay', 'guess_csv', or 'guess_json').}
 
 \item{session}{Character; the Strava ID/URL or local file path.}
 
-\item{coord_system}{Character; for 'guess_*' and 'manual_csv' modes: 'gps' (default) or 'local'.}
+\item{coord_system}{Character; for 'guess_*' modes: 'gps' (default), 'local', or 'auto'.}
 
 \item{verbose}{Logical; if TRUE, prints a summary.}
-
-\item{...}{Additional arguments passed to specific parsers (e.g., skip, col_unix for manual_csv).}
 }
 \value{
 An object of class \code{motion_trace}.
