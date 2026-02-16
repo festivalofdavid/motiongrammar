@@ -4,17 +4,21 @@
 \alias{interpolate}
 \title{Repair timeline gaps}
 \usage{
-interpolate(.data, method = "spline", hz = 1, max_gap_frames = 1)
+interpolate(.data, method = "linear", hz = 1, max_gap_frames = 5)
 }
 \arguments{
 \item{.data}{A motion_trace object.}
 
-\item{method}{String; 'spline', 'linear', or 'constant'.}
+\item{method}{String; 'linear' (default), 'spline', or 'constant'.}
 
 \item{hz}{Numeric; the recording frequency (e.g., 1, 10, 18). Default 1.}
 
-\item{max_gap_frames}{Integer; number of missing frames to allow before interpolation.}
+\item{max_gap_frames}{Integer; gaps larger than this (in frames) are left as NA.}
+}
+\value{
+An interpolated \code{motion_trace} object.
 }
 \description{
 Identifies missing frames based on expected frame rate and fills them
+using linear, spline, or constant (LOCF) interpolation.
 }

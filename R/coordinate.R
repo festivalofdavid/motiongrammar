@@ -49,16 +49,22 @@ coord_project <- function(.data, from, to, crs, from_units, to_units, conversion
       stop('Input data must contain "lat" and "lng" columns.')
     }
 
-    coords <- .data |>
-      sf::st_as_sf(coords = c('lng', 'lat'), crs = 4326, remove = FALSE) |>
-      sf::st_transform(crs = crs) |>
-      sf::st_coordinates()
+    valid <- !is.na(.data$lat) & !is.na(.data$lng)
 
-    output <- .data |>
-      dplyr::mutate(
-        x = coords[,1],
-        y = coords[,2],
-        z = if('altitude' %in% names(.data)) altitude else 0)
+    output <- .data
+    output$x <- NA_real_
+    output$y <- NA_real_
+    output$z <- if('altitude' %in% names(.data)) .data$altitude else 0
+
+    if(any(valid)){
+      coords <- .data[valid, ] |>
+        sf::st_as_sf(coords = c('lng', 'lat'), crs = 4326, remove = FALSE) |>
+        sf::st_transform(crs = crs) |>
+        sf::st_coordinates()
+
+      output$x[valid] <- coords[,1]
+      output$y[valid] <- coords[,2]
+    }
 
   } else if(from == 'xyz' && to == 'xyz'){
     if(!all(c('x', 'y') %in% names(.data))){
@@ -100,9 +106,11 @@ coord_normalise <- function(output, norm){
   if(isFALSE(norm)) return(output)
 
   if(isTRUE(norm)){
-    origin_x <- output$x[1]
-    origin_y <- output$y[1]
-    origin_z <- output$z[1]
+    first_valid <- which(!is.na(output$x) & !is.na(output$y))[1]
+    if(is.na(first_valid)) return(output)
+    origin_x <- output$x[first_valid]
+    origin_y <- output$y[first_valid]
+    origin_z <- output$z[first_valid]
   } else if(is.numeric(norm) && length(norm) >= 2){
     origin_x <- norm[1]
     origin_y <- norm[2]
@@ -157,6 +165,73 @@ coord_rotate <- function(output, rotate, crs){
   output
 }
 
+# segment name: coord_drop_zero_gps ---
+
+#' Drop lat/lng rows where both are zero (no GPS signal)
+#' @param output Data frame with lat and lng columns.
+#' @return Modified data frame with zero-signal lat/lng set to NA.
+#' @keywords internal
+coord_drop_zero_gps <- function(output){
+  if(!all(c('lat', 'lng') %in% names(output))) return(output)
+
+  is_zero <- output$lat == 0 & output$lng == 0
+  is_zero[is.na(is_zero)] <- FALSE
+  zero_rows <- which(is_zero)
+
+  if(length(zero_rows) > 0){
+    output$lat[is_zero] <- NA_real_
+    output$lng[is_zero] <- NA_real_
+  }
+
+  attr(output, 'dropped_zero_gps') <- list(
+    n = length(zero_rows),
+    pct = length(zero_rows) / nrow(output) * 100,
+    rows = zero_rows
+  )
+
+  output
+}
+
+# segment name: coord_drop_outliers ---
+
+#' Detect and replace outlier coordinates with NA
+#' @param output Data frame with x, y columns.
+#' @param k Numeric; IQR multiplier for outlier fences.
+#' @return Modified data frame with outlier x/y/z set to NA.
+#' @keywords internal
+coord_drop_outliers <- function(output, k = 3){
+  detect_bounds <- function(vals, k){
+    q <- stats::quantile(vals, c(0.25, 0.75), na.rm = TRUE)
+    iqr <- q[2] - q[1]
+    c(lower = q[1] - k * iqr, upper = q[2] + k * iqr)
+  }
+
+  x_bounds <- detect_bounds(output$x, k)
+  y_bounds <- detect_bounds(output$y, k)
+
+  is_outlier <- (output$x < x_bounds['lower'] | output$x > x_bounds['upper']) |
+                (output$y < y_bounds['lower'] | output$y > y_bounds['upper'])
+  is_outlier[is.na(is_outlier)] <- FALSE
+
+  outlier_rows <- which(is_outlier)
+
+  if(length(outlier_rows) > 0){
+    output$x[is_outlier] <- NA_real_
+    output$y[is_outlier] <- NA_real_
+    if('z' %in% names(output)) output$z[is_outlier] <- NA_real_
+  }
+
+  attr(output, 'dropped_outliers') <- list(
+    n = length(outlier_rows),
+    pct = length(outlier_rows) / nrow(output) * 100,
+    rows = outlier_rows,
+    x_bounds = x_bounds,
+    y_bounds = y_bounds
+  )
+
+  output
+}
+
 # segment name: coord_quality ---
 
 #' Build and attach the coordinate quality log
@@ -168,29 +243,30 @@ coord_rotate <- function(output, rotate, crs){
 #' @param to_units Character; target units.
 #' @param norm Logical or numeric; normalisation setting.
 #' @param rotate NULL or list; rotation setting.
+#' @param drop_outliers Logical; whether outliers were dropped.
 #' @return Data frame with quality attribute set.
 #' @keywords internal
-coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm, rotate){
+coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm, rotate, drop_outliers = FALSE){
   qual <- attr(output, 'quality')
   if(is.null(qual)) qual <- list()
 
   # --- Outlier / invalid coordinate detection ---
   outliers <- list()
 
-  if(all(c('lat', 'lng') %in% names(output))){
-    zero_gps <- which(output$lat == 0 & output$lng == 0)
-    if(length(zero_gps) > 0){
-      outliers$zero_gps <- list(
-        description = "Lat/Lng both zero (no signal)",
-        n = length(zero_gps),
-        pct = length(zero_gps) / nrow(output) * 100,
-        rows = zero_gps
-      )
-    }
+  dropped_zero <- attr(output, 'dropped_zero_gps')
+  if(!is.null(dropped_zero) && dropped_zero$n > 0){
+    outliers$zero_gps <- list(
+      description = sprintf("%d rows with Lat/Lng both zero (no signal) set to NA", dropped_zero$n),
+      n = dropped_zero$n,
+      pct = dropped_zero$pct,
+      rows = dropped_zero$rows
+    )
   }
 
   detect_iqr_outliers <- function(vals, label, k = 3){
-    q <- stats::quantile(vals, c(0.25, 0.75), na.rm = TRUE)
+    vals_clean <- vals[!is.na(vals)]
+    if(length(vals_clean) < 2) return(NULL)
+    q <- stats::quantile(vals_clean, c(0.25, 0.75))
     iqr <- q[2] - q[1]
     lower <- q[1] - k * iqr
     upper <- q[2] + k * iqr
@@ -211,6 +287,23 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
 
   y_out <- detect_iqr_outliers(output$y, "Y", k = 3)
   if(!is.null(y_out)) outliers$y_iqr <- y_out
+
+  if(drop_outliers){
+    dropped <- attr(output, 'dropped_outliers')
+    if(!is.null(dropped) && dropped$n > 0){
+      outliers$dropped <- list(
+        description = sprintf("%d outlier rows set to NA (IQR fences: x [%.2f, %.2f], y [%.2f, %.2f])",
+                              dropped$n,
+                              dropped$x_bounds['lower'], dropped$x_bounds['upper'],
+                              dropped$y_bounds['lower'], dropped$y_bounds['upper']),
+        n = dropped$n,
+        pct = dropped$pct,
+        rows = dropped$rows,
+        x_bounds = dropped$x_bounds,
+        y_bounds = dropped$y_bounds
+      )
+    }
+  }
 
   # --- Resolve CRS description ---
   crs_description <- NA_character_
@@ -266,8 +359,8 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
     rotation_degrees = if(!is.null(rotate)) theta * (180 / pi) else NA,
 
     # Post-transform summary
-    x_range = diff(range(output$x, na.rm = TRUE)),
-    y_range = diff(range(output$y, na.rm = TRUE)),
+    x_range = if(all(is.na(output$x))) NA_real_ else diff(range(output$x, na.rm = TRUE)),
+    y_range = if(all(is.na(output$y))) NA_real_ else diff(range(output$y, na.rm = TRUE)),
     z_present = ('z' %in% names(output) && any(output$z != 0, na.rm = TRUE)),
     total_rows = nrow(output),
 
@@ -295,6 +388,7 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
 #' @param from_units Character; the units of the source ('m', 'cm', 'mm', 'km', 'ft', 'in', 'yd', 'mi').
 #' @param to_units Character; the units of the target. Defaults to 'm'.
 #' @param rotate NULL or a list of two c(lat, lng) vectors defining a sideline. When provided, rotates coordinates so the sideline aligns with the x-axis.
+#' @param drop_outliers Logical; if TRUE, replaces coordinates that fall outside 3 * IQR fences with NA.
 #' @return An object of class \code{motion_trace}.
 #' @export
 coordinate <- function(.data,
@@ -304,11 +398,14 @@ coordinate <- function(.data,
                       norm = FALSE,
                       from_units = NULL,
                       to_units = 'm',
-                      rotate = NULL){
+                      rotate = NULL,
+                      drop_outliers = FALSE){
 
   conversions <- coord_conversions(from_units, to_units)
 
-  output <- coord_project(.data, from, to, crs, from_units, to_units, conversions)
+  output <- coord_drop_zero_gps(.data)
+
+  output <- coord_project(output, from, to, crs, from_units, to_units, conversions)
 
   if(!inherits(output, 'motion_trace')){
     class(output) <- c('motion_trace', class(output))
@@ -322,10 +419,14 @@ coordinate <- function(.data,
     class(output) <- c('motion_trace', class(output))
   }
 
+  if(drop_outliers){
+    output <- coord_drop_outliers(output)
+  }
+
   attr(output, 'metadata')$units <- to_units
   attr(output, 'metadata')$origin_type <- if(isTRUE(norm)) 'starting_pos' else if(is.numeric(norm)) 'custom' else 'none'
 
-  output <- coord_quality_log(output, from, to, crs, from_units, to_units, norm, rotate)
+  output <- coord_quality_log(output, from, to, crs, from_units, to_units, norm, rotate, drop_outliers)
 
   return(output)
 }

@@ -4,18 +4,34 @@
 \alias{filtrate}
 \title{Filter Motion Trace Noise on xyz coordinates}
 \usage{
-filtrate(.data, method = "butterworth", n = 2, cutoff = 0.1, type = "low")
+filtrate(
+  .data,
+  method = "butterworth",
+  n = 2,
+  cutoff = 0.1,
+  type = "low",
+  window = 5,
+  alpha = 0.3,
+  poly_order = 2
+)
 }
 \arguments{
 \item{.data}{A motion_trace object.}
 
-\item{method}{Character; the filtering algorithm. Just using butterworth right now}
+\item{method}{Character; the filtering algorithm. One of
+\code{'butterworth'}, \code{'sma'}, \code{'ema'}, or \code{'savgol'}.}
 
-\item{n}{Filter order}
+\item{n}{Filter order (Butterworth only).}
 
-\item{cutoff}{Filter frequency}
+\item{cutoff}{Filter frequency (Butterworth only).}
 
-\item{type}{filter type (ie., high or low pass)}
+\item{type}{Filter type, e.g. \code{'low'} or \code{'high'} (Butterworth only).}
+
+\item{window}{Integer; window size for SMA or Savitzky-Golay filters.}
+
+\item{alpha}{Numeric; smoothing factor for EMA (0-1).}
+
+\item{poly_order}{Integer; polynomial order for Savitzky-Golay filter.}
 }
 \value{
 A filtered \code{motion_trace} object.

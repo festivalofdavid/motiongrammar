@@ -987,6 +987,42 @@ quality_report <- function(.data){
       }
       cat("\n")
     }
+
+    else if(step_name == "filtrate"){
+      n_passes <- length(s$passes)
+      cat(sprintf("  Filter passes: %d\n", n_passes))
+      cat(sprintf("  Chain:         %s\n\n",
+                  paste(vapply(s$passes, function(p) p$method, character(1)), collapse = " → ")))
+
+      for(i in seq_along(s$passes)){
+        p <- s$passes[[i]]
+        cat(sprintf("  Pass %d: %s\n", i, toupper(p$method)))
+        cat(sprintf("    Timestamp:   %s\n", format(p$timestamp, "%Y-%m-%d %H:%M:%S")))
+        cat(sprintf("    Rows:        %s\n", format(p$total_rows, big.mark = ",")))
+
+        # Parameters
+        cat("    Parameters\n")
+        for(pname in names(p$parameters)){
+          cat(sprintf("      %-12s %s\n", paste0(pname, ":"), p$parameters[[pname]]))
+        }
+
+        # NAs introduced (relevant for edge-effect filters like SMA)
+        total_na <- sum(p$na_introduced)
+        if(total_na > 0){
+          cat(sprintf("    NAs introduced: %d across %s\n",
+                      total_na, paste(names(p$na_introduced), collapse = ", ")))
+        } else {
+          cat("    NAs introduced: None\n")
+        }
+
+        # Dependencies for this pass
+        cat("    Dependencies\n")
+        for(pkg_name in names(p$dependencies)){
+          cat(sprintf("      %-10s v%s\n", pkg_name, p$dependencies[[pkg_name]]))
+        }
+        cat("\n")
+      }
+    }
   }
 
   cat("═══════════════════════════════════════════════════════════\n")
@@ -1096,6 +1132,11 @@ metadata_report <- function(.data){
                 meta$native_hz, ""))
     cat(sprintf("│ Sample Interval:    %.3f seconds%-23s │\n",
                 meta$median_dt, ""))
+  }
+
+  if(!is.null(meta$filters_applied)){
+    chain <- paste(meta$filters_applied, collapse = " → ")
+    cat(sprintf("│ Filters Applied:    %-35s │\n", chain))
   }
 
   cat("└─────────────────────────────────────────────────────────┘\n\n")

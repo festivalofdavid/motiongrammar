@@ -12,7 +12,8 @@ coordinate(
   norm = FALSE,
   from_units = NULL,
   to_units = "m",
-  rotate = NULL
+  rotate = NULL,
+  drop_outliers = FALSE
 )
 }
 \arguments{
@@ -29,6 +30,8 @@ coordinate(
 \item{to_units}{Character; the units of the target. Defaults to 'm'.}
 
 \item{rotate}{NULL or a list of two c(lat, lng) vectors defining a sideline. When provided, rotates coordinates so the sideline aligns with the x-axis.}
+
+\item{drop_outliers}{Logical; if TRUE, replaces coordinates that fall outside 3 * IQR fences with NA.}
 }
 \value{
 An object of class \code{motion_trace}.

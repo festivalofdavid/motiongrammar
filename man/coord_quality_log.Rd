@@ -4,7 +4,17 @@
 \alias{coord_quality_log}
 \title{Build and attach the coordinate quality log}
 \usage{
-coord_quality_log(output, from, to, crs, from_units, to_units, norm, rotate)
+coord_quality_log(
+  output,
+  from,
+  to,
+  crs,
+  from_units,
+  to_units,
+  norm,
+  rotate,
+  drop_outliers = FALSE
+)
 }
 \arguments{
 \item{output}{Data frame with x, y, z columns.}
@@ -22,6 +32,8 @@ coord_quality_log(output, from, to, crs, from_units, to_units, norm, rotate)
 \item{norm}{Logical or numeric; normalisation setting.}
 
 \item{rotate}{NULL or list; rotation setting.}
+
+\item{drop_outliers}{Logical; whether outliers were dropped.}
 }
 \value{
 Data frame with quality attribute set.
