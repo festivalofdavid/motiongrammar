@@ -5,23 +5,23 @@
 \title{Initiate a Motion Grammar Session}
 \usage{
 initiate(
-  source = "strava",
+  source = "auto",
   session = "17134112147",
   coord_system = "gps",
-  verbose = TRUE
+  verbose = TRUE,
+  ...
 )
 }
 \arguments{
-\item{source}{Character; the data provider ('strava', 'catapult_replay', 'guess_csv', or 'guess_json').}
+\item{source}{Character; data source ('auto', 'strava', 'catapult_replay', 'guess_csv', 'manual_csv', 'gpx')}
 
-\item{session}{Character; the Strava ID/URL or local file path.}
+\item{session}{Character; Strava ID/URL or file path}
 
-\item{coord_system}{Character; for 'guess_*' modes: 'gps' (default), 'local', or 'auto'.}
+\item{coord_system}{Character; 'gps' or 'local'}
 
-\item{verbose}{Logical; if TRUE, prints a summary.}
-}
-\value{
-An object of class \code{motion_trace}.
+\item{verbose}{Logical; print summary}
+
+\item{...}{Additional arguments for manual_csv}
 }
 \description{
 Initiate a Motion Grammar Session

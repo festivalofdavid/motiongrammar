@@ -7,24 +7,22 @@
 #' @return A list of updated tokens.
 #' @keywords internal
 get_valid_tokens <- function(tokens,
-                            verbose = TRUE) {
+                            verbose = TRUE){
   now <- as.integer(Sys.time())
 
-  if (!is.null(tokens$expires_at) && (tokens$expires_at - now) > 120) {
+  if(!is.null(tokens$expires_at) && (tokens$expires_at - now) > 120){
     return(tokens)
   }
 
-  if (verbose) {
+  if(verbose){
     message('Refreshing Strava tokens...')
   }
 
   resp <- httr2::request('https://www.strava.com/oauth/token') |>
-    httr2::req_body_form(
-      client_id     = tokens$client_id,
+    httr2::req_body_form(client_id = tokens$client_id,
       client_secret = tokens$client_secret,
-      grant_type    = 'refresh_token',
-      refresh_token = tokens$refresh_token
-    ) |>
+      grant_type  = 'refresh_token',
+      refresh_token = tokens$refresh_token) |>
     httr2::req_perform() |>
     httr2::resp_body_json()
 
@@ -33,8 +31,9 @@ get_valid_tokens <- function(tokens,
   tokens$expires_at    <- resp$expires_at
 
   path <- path.expand('~/strava_tokens.json')
-  writeLines(
-    jsonlite::toJSON(tokens, auto_unbox = TRUE, pretty = TRUE),
+  writeLines(jsonlite::toJSON(tokens,
+                              auto_unbox = TRUE,
+                              pretty = TRUE),
     path
   )
 
@@ -51,7 +50,7 @@ get_valid_tokens <- function(tokens,
 #' @keywords internal
 get_physics_streams <- function(activity_id,
                                access_token,
-                               start_time_iso) {
+                               start_time_iso){
 
   url <- paste0('https://www.strava.com/api/v3/activities/',
                 activity_id,
@@ -67,12 +66,10 @@ get_physics_streams <- function(activity_id,
   start_unix <- as.numeric(lubridate::as_datetime(start_time_iso))
 
   streams_df <- resp |>
-    purrr::imap(\(data_list, key) {
-      if (key == 'latlng') {
-        tibble::tibble(
-          lat = purrr::map_dbl(data_list$data, 1),
-          lng = purrr::map_dbl(data_list$data, 2)
-        )
+    purrr::imap(\(data_list, key){
+      if(key == 'latlng'){
+        tibble::tibble(lat = purrr::map_dbl(data_list$data, 1),
+          lng = purrr::map_dbl(data_list$data, 2))
       } else {
         tibble::tibble(!!key := unlist(data_list$data))
       }
@@ -92,7 +89,7 @@ get_physics_streams <- function(activity_id,
 #' @keywords internal
 initiate_guess_csv <- function(.data_path,
                                source = "gps",
-                               confidence_threshold = 0.8) {
+                               confidence_threshold = 0.8){
 
   source <- match.arg(source, choices = c("gps", "local", "auto"))
 
@@ -105,21 +102,21 @@ initiate_guess_csv <- function(.data_path,
     dplyr::summarise(n = dplyr::n(), .groups = 'drop') |>
     dplyr::arrange(dplyr::desc(n))
 
-  if (nrow(line_stats) == 0) {
+  if(nrow(line_stats) == 0){
     stop('No valid CSV structure detected in file.')
   }
 
   target_commas <- line_stats$count[1]
   first_data_idx <- which(comma_counts == target_commas)[1]
 
-  if (is.na(first_data_idx) || first_data_idx < 2) {
+  if(is.na(first_data_idx) || first_data_idx < 2){
     stop('Could not identify data block in file.')
   }
 
   potential_headers <- all_lines[1:(first_data_idx - 1)]
   header_candidates <- which(stringr::str_detect(potential_headers, '[A-Za-z]'))
 
-  if (length(header_candidates) == 0) {
+  if(length(header_candidates) == 0){
     stop('Could not identify a valid header row.')
   }
 
@@ -133,14 +130,14 @@ initiate_guess_csv <- function(.data_path,
 
   clean_names <- raw_cols[raw_cols != '']
 
-  if (length(clean_names) == 0) {
+  if(length(clean_names) == 0){
     stop('No valid column names found in header.')
   }
 
   clean_names <- make.unique(clean_names, sep = '_')
   data_lines <- all_lines[comma_counts == target_commas]
 
-  if (length(data_lines) == 0) {
+  if(length(data_lines) == 0){
     stop('No data rows found matching the identified structure.')
   }
 
@@ -156,7 +153,7 @@ initiate_guess_csv <- function(.data_path,
   df <- df[, 1:length(clean_names), drop = FALSE]
   colnames(df) <- clean_names
 
-  if (source == "auto") {
+  if(source == "auto"){
     col_lower <- stringr::str_to_lower(colnames(df))
 
     has_lat <- any(stringr::str_detect(col_lower, 'lat'))
@@ -164,9 +161,9 @@ initiate_guess_csv <- function(.data_path,
     has_x <- any(col_lower == 'x' | stringr::str_detect(col_lower, 'coord_x'))
     has_y <- any(col_lower == 'y' | stringr::str_detect(col_lower, 'coord_y'))
 
-    if (has_lat || has_lon) {
+    if(has_lat || has_lon){
       source <- "gps"
-    } else if (has_x || has_y) {
+    } else if(has_x || has_y){
       source <- "local"
     } else {
       source <- "gps"
@@ -175,7 +172,7 @@ initiate_guess_csv <- function(.data_path,
     message(sprintf("Auto-detected coordinate system: %s", source))
   }
 
-  if (source == "gps") {
+  if(source == "gps"){
     targets <- list(
       unix_time = list(
         primary = c('unix', 'timestamp', 'unixtime', 'time_ms', 'utc', 'epoch'),
@@ -217,13 +214,13 @@ initiate_guess_csv <- function(.data_path,
     output_cols <- c('unix_time', 'x', 'y', 'z')
   }
 
-  find_best_match <- function(target_patterns, available_cols) {
+  find_best_match <- function(target_patterns, available_cols){
     available_lower <- stringr::str_to_lower(available_cols)
 
-    for (pattern in target_patterns) {
+    for(pattern in target_patterns){
       pattern_lower <- stringr::str_to_lower(pattern)
       exact_match <- which(available_lower == pattern_lower)
-      if (length(exact_match) > 0) {
+      if(length(exact_match) > 0){
         return(available_cols[exact_match[1]])
       }
     }
@@ -231,14 +228,14 @@ initiate_guess_csv <- function(.data_path,
     best_score <- 0
     best_match <- NULL
 
-    for (pattern in target_patterns) {
+    for(pattern in target_patterns){
       pattern_lower <- stringr::str_to_lower(pattern)
 
-      for (i in seq_along(available_cols)) {
+      for(i in seq_along(available_cols)){
         col_lower <- available_lower[i]
         sim <- 1 - stringdist::stringdist(pattern_lower, col_lower, method = 'jw')
 
-        if (sim > best_score && sim >= confidence_threshold) {
+        if(sim > best_score && sim >= confidence_threshold){
           best_score <- sim
           best_match <- available_cols[i]
         }
@@ -252,38 +249,38 @@ initiate_guess_csv <- function(.data_path,
   mappings <- list()
   available_cols <- colnames(df)
 
-  for (target_name in names(targets)) {
+  for(target_name in names(targets)){
     match <- find_best_match(targets[[target_name]]$primary, available_cols)
 
-    if (is.null(match) && !is.null(targets[[target_name]]$fallback)) {
+    if(is.null(match) && !is.null(targets[[target_name]]$fallback)){
       match <- find_best_match(targets[[target_name]]$fallback, available_cols)
     }
 
     mappings[[target_name]] <- match
 
     # Remove matched column from pool to prevent double-matching
-    if (!is.null(match)) {
+    if(!is.null(match)){
       available_cols <- setdiff(available_cols, match)
     }
   }
 
-  for (target_name in names(mappings)) {
+  for(target_name in names(mappings)){
     original_col <- mappings[[target_name]]
 
-    if (!is.null(original_col) && original_col %in% colnames(df)) {
+    if(!is.null(original_col) && original_col %in% colnames(df)){
       df <- df |>
         dplyr::rename(!!target_name := !!original_col)
     }
   }
 
-  if ('unix_time' %in% colnames(df)) {
+  if('unix_time' %in% colnames(df)){
     df <- df |>
       dplyr::mutate(unix_time = convert_to_unix(unix_time))
   }
 
   other_cols <- setdiff(output_cols, 'unix_time')
-  for (col in other_cols) {
-    if (col %in% colnames(df)) {
+  for(col in other_cols){
+    if(col %in% colnames(df)){
       df <- df |>
         dplyr::mutate(!!col := suppressWarnings(as.numeric(.data[[col]])))
     }
@@ -293,19 +290,19 @@ initiate_guess_csv <- function(.data_path,
     dplyr::select(dplyr::any_of(output_cols))
 
   missing_cols <- setdiff(output_cols, colnames(output))
-  for (col in missing_cols) {
+  for(col in missing_cols){
     output[[col]] <- NA_real_
   }
 
   output <- output |>
     dplyr::select(dplyr::all_of(output_cols))
 
-  if (nrow(output) == 0) {
+  if(nrow(output) == 0){
     stop('No valid data rows after parsing.')
   }
 
   all_na <- all(sapply(output, function(x) all(is.na(x))))
-  if (all_na) {
+  if(all_na){
     warning('All columns are NA - column matching may have failed. Check your column names.')
   }
 
@@ -326,21 +323,21 @@ initiate_manual_csv <- function(.data_path,
                                coord_system = c("gps", "local"),
                                max_empty_lines = 3,
                                n_max = NULL,
-                               comment = "#") {
+                               comment = "#"){
 
   coord_system <- match.arg(coord_system)
 
-  if (!file.exists(.data_path)) {
+  if(!file.exists(.data_path)){
     stop(sprintf("File not found: %s", .data_path))
   }
 
-  if (missing(col_unix)) stop("col_unix must be specified")
-  if (missing(col_lat)) stop("col_lat must be specified")
-  if (missing(col_lng)) stop("col_lng must be specified")
+  if(missing(col_unix)) stop("col_unix must be specified")
+  if(missing(col_lat)) stop("col_lat must be specified")
+  if(missing(col_lng)) stop("col_lng must be specified")
 
   all_lines <- readr::read_lines(.data_path)
 
-  if (skip > 0) {
+  if(skip > 0){
     all_lines <- all_lines[(skip + 1):length(all_lines)]
   }
 
@@ -351,10 +348,10 @@ initiate_manual_csv <- function(.data_path,
   consecutive_empty <- 0
   stop_at <- length(all_lines)
 
-  for (i in seq_along(all_lines)) {
-    if (empty_pattern[i]) {
+  for(i in seq_along(all_lines)){
+    if(empty_pattern[i]){
       consecutive_empty <- consecutive_empty + 1
-      if (consecutive_empty >= max_empty_lines) {
+      if(consecutive_empty >= max_empty_lines){
         stop_at <- i - max_empty_lines
         break
       }
@@ -375,7 +372,7 @@ initiate_manual_csv <- function(.data_path,
     )
   )
 
-  if (nrow(df) == 0) {
+  if(nrow(df) == 0){
     stop("No data rows found after parsing")
   }
 
@@ -385,30 +382,30 @@ initiate_manual_csv <- function(.data_path,
   lat_idx <- which(col_names_lower == stringr::str_to_lower(col_lat))
   lng_idx <- which(col_names_lower == stringr::str_to_lower(col_lng))
 
-  if (length(unix_idx) == 0) {
+  if(length(unix_idx) == 0){
     stop(sprintf("Column '%s' not found. Available: %s",
                  col_unix, paste(colnames(df), collapse = ", ")))
   }
 
-  if (length(lat_idx) == 0) {
+  if(length(lat_idx) == 0){
     stop(sprintf("Column '%s' not found. Available: %s",
                  col_lat, paste(colnames(df), collapse = ", ")))
   }
 
-  if (length(lng_idx) == 0) {
+  if(length(lng_idx) == 0){
     stop(sprintf("Column '%s' not found. Available: %s",
                  col_lng, paste(colnames(df), collapse = ", ")))
   }
 
   alt_idx <- NULL
-  if (!is.null(col_altitude)) {
+  if(!is.null(col_altitude)){
     alt_idx <- which(col_names_lower == stringr::str_to_lower(col_altitude))
-    if (length(alt_idx) == 0) {
+    if(length(alt_idx) == 0){
       warning(sprintf("Column '%s' not found. Setting altitude to NA.", col_altitude))
     }
   }
 
-  if (coord_system == "gps") {
+  if(coord_system == "gps"){
     output_names <- c('unix_time', 'lat', 'lng', 'altitude')
   } else {
     output_names <- c('unix_time', 'x', 'y', 'z')
@@ -420,7 +417,7 @@ initiate_manual_csv <- function(.data_path,
     coord2 = df[[lng_idx[1]]]
   )
 
-  if (!is.null(alt_idx) && length(alt_idx) > 0) {
+  if(!is.null(alt_idx) && length(alt_idx) > 0){
     output$coord3 <- df[[alt_idx[1]]]
   } else {
     output$coord3 <- NA_character_
@@ -438,7 +435,7 @@ initiate_manual_csv <- function(.data_path,
       !!output_names[4] := suppressWarnings(as.numeric(.data[[output_names[4]]]))
     )
 
-  if (nrow(output) == 0) {
+  if(nrow(output) == 0){
     stop('No valid data rows after parsing')
   }
 
@@ -446,18 +443,18 @@ initiate_manual_csv <- function(.data_path,
   na_coord1 <- sum(is.na(output[[output_names[2]]]))
   na_coord2 <- sum(is.na(output[[output_names[3]]]))
 
-  if (na_unix > 0) {
+  if(na_unix > 0){
     warning(sprintf("%d unix_time values are NA", na_unix))
   }
-  if (na_coord1 > 0) {
+  if(na_coord1 > 0){
     warning(sprintf("%d %s values are NA", na_coord1, output_names[2]))
   }
-  if (na_coord2 > 0) {
+  if(na_coord2 > 0){
     warning(sprintf("%d %s values are NA", na_coord2, output_names[3]))
   }
 
   # Store column mapping as attribute
-  if (coord_system == "gps") {
+  if(coord_system == "gps"){
     attr(output, 'column_mapping') <- list(
       unix_time = col_unix,
       lat = col_lat,
@@ -478,9 +475,9 @@ initiate_manual_csv <- function(.data_path,
 
 #' Parse GPX Files
 #' @keywords internal
-initiate_gpx <- function(.data_path) {
+initiate_gpx <- function(.data_path){
 
-  if (!requireNamespace("sf", quietly = TRUE)) {
+  if(!requireNamespace("sf", quietly = TRUE)){
     stop("sf package required for GPX files. Install with: install.packages('sf')")
   }
 
@@ -502,8 +499,8 @@ initiate_gpx <- function(.data_path) {
 
 #' Null Coalescing Operator
 #' @keywords internal
-`%||%` <- function(a, b) {
-  if (is.null(a)) b else a
+`%||%` <- function(a, b){
+  if(is.null(a)) b else a
 }
 
 #' Create Metadata
@@ -512,9 +509,9 @@ create_metadata <- function(session,
                            source,
                            trace,
                            device_info = NULL,
-                           coord_system = 'gps') {
+                           coord_system = 'gps'){
 
-  session_name <- if (file.exists(session)) {
+  session_name <- if(file.exists(session)){
     basename(session)
   } else {
     as.character(session)
@@ -527,11 +524,11 @@ create_metadata <- function(session,
       "\\d{2}-\\d{2}-\\d{4}"
     )
 
-    for (pattern in date_patterns) {
+    for(pattern in date_patterns){
       match <- stringr::str_extract(session_name, pattern)
-      if (!is.na(match)) {
+      if(!is.na(match)){
         parsed <- lubridate::parse_date_time(match, orders = c('ymd', 'dmy'))
-        if (!is.na(parsed)) return(as.Date(parsed))
+        if(!is.na(parsed)) return(as.Date(parsed))
       }
     }
     NA
@@ -540,7 +537,7 @@ create_metadata <- function(session,
   time_diffs <- diff(trace$unix_time)
   time_diffs <- time_diffs[!is.na(time_diffs) & time_diffs > 0]
 
-  if (length(time_diffs) > 0) {
+  if(length(time_diffs) > 0){
     median_dt <- median(time_diffs)
     native_hz <- round(1 / median_dt, 2)
   } else {
@@ -549,7 +546,7 @@ create_metadata <- function(session,
   }
 
   time_range <- range(trace$unix_time, na.rm = TRUE)
-  duration_sec <- if (!any(is.na(time_range))) diff(time_range) else NA
+  duration_sec <- if(!any(is.na(time_range))) diff(time_range) else NA
 
   pkg_version <- tryCatch(
     as.character(utils::packageVersion('motionGrammar')),
@@ -591,22 +588,22 @@ create_metadata <- function(session,
 
 #' Update Metadata
 #' @export
-set_metadata <- function(.data, ...) {
+set_metadata <- function(.data, ...){
 
-  if (!inherits(.data, 'motion_trace')) {
+  if(!inherits(.data, 'motion_trace')){
     stop("Input must be a motion_trace object")
   }
 
   meta <- attr(.data, 'metadata')
 
-  if (is.null(meta)) {
+  if(is.null(meta)){
     warning("No metadata found. Creating new metadata structure.")
     meta <- list()
   }
 
   new_meta <- list(...)
 
-  for (key in names(new_meta)) {
+  for(key in names(new_meta)){
     meta[[key]] <- new_meta[[key]]
   }
 
@@ -616,22 +613,22 @@ set_metadata <- function(.data, ...) {
 
 #' Normalise Unix Timestamps
 #' @keywords internal
-norm_unix <- function(unix_vec) {
+norm_unix <- function(unix_vec){
 
   valid_times <- unix_vec[!is.na(unix_vec)]
 
-  if (length(valid_times) == 0) {
+  if(length(valid_times) == 0){
     return(unix_vec)
   }
 
   median_time <- median(valid_times, na.rm = TRUE)
   digits <- floor(log10(abs(median_time))) + 1
 
-  if (digits == 13) {
+  if(digits == 13){
     return(unix_vec / 1000)
-  } else if (digits == 11 || digits == 12) {
+  } else if(digits == 11 || digits == 12){
     return(unix_vec / 100)
-  } else if (digits == 9 || digits == 10) {
+  } else if(digits == 9 || digits == 10){
     return(unix_vec)
   } else {
     warning(sprintf("Unexpected unix_time format (%d digits). Expected 9-13 digits. Returning unchanged.", digits))
@@ -641,21 +638,21 @@ norm_unix <- function(unix_vec) {
 
 #' Convert to Unix Time
 #' @keywords internal
-convert_to_unix <- function(time_vec) {
+convert_to_unix <- function(time_vec){
 
   valid_times <- time_vec[!is.na(time_vec)]
 
-  if (length(valid_times) == 0) {
+  if(length(valid_times) == 0){
     return(as.numeric(time_vec))
   }
 
   numeric_vec <- suppressWarnings(as.numeric(time_vec))
 
-  if (sum(!is.na(numeric_vec)) > length(valid_times) * 0.8) {
+  if(sum(!is.na(numeric_vec)) > length(valid_times) * 0.8){
     valid_numeric <- numeric_vec[!is.na(numeric_vec)]
     median_val <- median(valid_numeric, na.rm = TRUE)
 
-    if (median_val > 100000) {
+    if(median_val > 100000){
       return(norm_unix(numeric_vec))
     } else {
       return(numeric_vec)
@@ -669,13 +666,13 @@ convert_to_unix <- function(time_vec) {
                                                     "ymd", "dmy", "mdy"))
     unix_time <- as.numeric(parsed)
 
-    if (sum(!is.na(unix_time)) > length(valid_times) * 0.5) {
+    if(sum(!is.na(unix_time)) > length(valid_times) * 0.5){
       return(unix_time)
     } else {
       warning("Could not parse time column as datetime. Returning as numeric.")
       return(as.numeric(time_vec))
     }
-  }, error = function(e) {
+  }, error = function(e){
     warning(sprintf("Time conversion failed: %s. Using numeric conversion.", e$message))
     return(as.numeric(time_vec))
   })
@@ -685,12 +682,12 @@ convert_to_unix <- function(time_vec) {
 
 #' Initialize Quality Log
 #' @keywords internal
-init_quality_log <- function(trace, source) {
+init_quality_log <- function(trace, source){
 
   time_diffs <- diff(trace$unix_time)
   time_diffs <- time_diffs[!is.na(time_diffs) & time_diffs > 0]
 
-  if (length(time_diffs) > 0) {
+  if(length(time_diffs) > 0){
     median_dt <- median(time_diffs)
     native_hz <- round(1 / median_dt, 2)
   } else {
@@ -698,10 +695,10 @@ init_quality_log <- function(trace, source) {
     native_hz <- NA
   }
 
-  if (!is.na(median_dt)) {
+  if(!is.na(median_dt)){
     gap_threshold <- median_dt * 3
     gaps <- which(time_diffs > gap_threshold)
-    largest_gap <- if (length(gaps) > 0) max(time_diffs[gaps]) else 0
+    largest_gap <- if(length(gaps) > 0) max(time_diffs[gaps]) else 0
   } else {
     gaps <- integer(0)
     largest_gap <- 0
@@ -716,62 +713,62 @@ init_quality_log <- function(trace, source) {
   issues <- list()
   warnings <- list()
 
-  if (completeness < 0.90) {
+  if(completeness < 0.90){
     issues <- c(issues, sprintf("Low coordinate completeness: %.1f%%", completeness * 100))
-  } else if (completeness < 0.95) {
+  } else if(completeness < 0.95){
     warnings <- c(warnings, sprintf("Moderate missing coordinates: %.1f%%", (1 - completeness) * 100))
   }
 
-  if (!is.na(native_hz)) {
-    if (native_hz < 1) {
+  if(!is.na(native_hz)){
+    if(native_hz < 1){
       issues <- c(issues, sprintf("Very low sampling rate: %.2f Hz", native_hz))
-    } else if (native_hz < 5) {
+    } else if(native_hz < 5){
       warnings <- c(warnings, sprintf("Low sampling rate: %.2f Hz (recommend ≥5 Hz)", native_hz))
     }
   }
 
   gap_percentage <- length(gaps) / length(time_diffs) * 100
-  if (gap_percentage > 5) {
+  if(gap_percentage > 5){
     issues <- c(issues, sprintf("High gap frequency: %d gaps (%.1f%% of intervals)",
                                 length(gaps), gap_percentage))
-  } else if (gap_percentage > 2) {
+  } else if(gap_percentage > 2){
     warnings <- c(warnings, sprintf("Moderate gap frequency: %d gaps detected", length(gaps)))
   }
 
-  if (largest_gap > 10) {
+  if(largest_gap > 10){
     issues <- c(issues, sprintf("Large temporal gap detected: %.1f seconds", largest_gap))
-  } else if (largest_gap > 5) {
+  } else if(largest_gap > 5){
     warnings <- c(warnings, sprintf("Notable gap detected: %.1f seconds", largest_gap))
   }
 
-  if (!is.na(duration_sec)) {
-    if (duration_sec < 60) {
+  if(!is.na(duration_sec)){
+    if(duration_sec < 60){
       warnings <- c(warnings, sprintf("Very short session: %.0f seconds", duration_sec))
-    } else if (duration_sec > 7200) {
+    } else if(duration_sec > 7200){
       warnings <- c(warnings, sprintf("Very long session: %.1f hours", duration_sec / 3600))
     }
   }
 
-  if (source %in% c('strava', 'guess_csv', 'catapult_replay', 'manual_csv', 'gpx')) {
+  if(source %in% c('strava', 'guess_csv', 'catapult_replay', 'manual_csv', 'gpx')){
     lat_range <- diff(range(trace$lat, na.rm = TRUE))
     lng_range <- diff(range(trace$lng, na.rm = TRUE))
 
-    if (lat_range < 0.0001 && lng_range < 0.0001) {
+    if(lat_range < 0.0001 && lng_range < 0.0001){
       warnings <- c(warnings, "Very small coordinate range - indoor/stationary session?")
     }
 
     invalid_lat <- sum(abs(trace$lat) > 90, na.rm = TRUE)
     invalid_lng <- sum(abs(trace$lng) > 180, na.rm = TRUE)
 
-    if (invalid_lat > 0 || invalid_lng > 0) {
+    if(invalid_lat > 0 || invalid_lng > 0){
       issues <- c(issues, sprintf("Invalid GPS coordinates: %d latitude, %d longitude",
                                   invalid_lat, invalid_lng))
     }
   }
 
   n_duplicates <- sum(duplicated(trace$unix_time))
-  if (n_duplicates > 0) {
-    if (n_duplicates > nrow(trace) * 0.01) {
+  if(n_duplicates > 0){
+    if(n_duplicates > nrow(trace) * 0.01){
       issues <- c(issues, sprintf("High duplicate timestamps: %d (%.1f%%)",
                                   n_duplicates, n_duplicates / nrow(trace) * 100))
     } else {
@@ -800,14 +797,14 @@ init_quality_log <- function(trace, source) {
       largest_gap_sec = largest_gap,
       gap_percentage = gap_percentage,
 
-      lat_range = if (source != 'local') diff(range(trace$lat, na.rm = TRUE)) else NA,
-      lng_range = if (source != 'local') diff(range(trace$lng, na.rm = TRUE)) else NA,
+      lat_range = if(source != 'local') diff(range(trace$lat, na.rm = TRUE)) else NA,
+      lng_range = if(source != 'local') diff(range(trace$lng, na.rm = TRUE)) else NA,
 
       n_duplicates = n_duplicates,
 
       qc_pass = qc_pass,
-      issues = if (length(issues) > 0) unlist(issues) else character(0),
-      warnings = if (length(warnings) > 0) unlist(warnings) else character(0)
+      issues = if(length(issues) > 0) unlist(issues) else character(0),
+      warnings = if(length(warnings) > 0) unlist(warnings) else character(0)
     )
   )
 
@@ -816,12 +813,12 @@ init_quality_log <- function(trace, source) {
 
 #' Quality Report
 #' @export
-quality_report <- function(.data) {
+quality_report <- function(.data){
 
   qual <- attr(.data, 'quality')
   meta <- attr(.data, 'metadata')
 
-  if (is.null(qual)) {
+  if(is.null(qual)){
     cat("No quality log found.\n")
     return(invisible(NULL))
   }
@@ -830,10 +827,10 @@ quality_report <- function(.data) {
   cat("            MOTION TRACE QUALITY REPORT                    \n")
   cat("═══════════════════════════════════════════════════════════\n\n")
 
-  if (!is.null(meta)) {
+  if(!is.null(meta)){
     cat(sprintf("Session: %s\n", meta$name))
     cat(sprintf("Source:  %s\n", meta$source))
-    if (!is.na(meta$player_id)) {
+    if(!is.na(meta$player_id)){
       cat(sprintf("Player:  %s\n", meta$player_id))
     }
     cat("\n")
@@ -842,60 +839,152 @@ quality_report <- function(.data) {
   steps <- names(qual)
   cat(sprintf("Processing: %s\n\n", paste(steps, collapse = " → ")))
 
-  for (step_name in steps) {
+  for(step_name in steps){
     s <- qual[[step_name]]
 
     cat("───────────────────────────────────────────────────────────\n")
     cat(sprintf(" %s\n", toupper(step_name)))
     cat("───────────────────────────────────────────────────────────\n")
 
-    if (step_name == "initiate") {
+    if(step_name == "initiate"){
       cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
       cat(sprintf("  Rows:          %s\n", format(s$total_rows, big.mark = ",")))
       cat(sprintf("  Completeness:  %.1f%% (%s valid coordinates)\n",
                   s$completeness * 100,
                   format(s$valid_coordinates, big.mark = ",")))
 
-      if (!is.na(s$native_hz)) {
+      if(!is.na(s$native_hz)){
         cat(sprintf("  Sample Rate:   %.2f Hz (%.3f s median interval)\n",
                     s$native_hz, s$median_dt))
       }
 
       cat(sprintf("  Duration:      %.1f minutes\n", s$duration_sec / 60))
 
-      if (s$n_gaps > 0) {
+      if(s$n_gaps > 0){
         cat(sprintf("  Gaps:          %d (%.1f%% of intervals, largest: %.1fs)\n",
                     s$n_gaps, s$gap_percentage, s$largest_gap_sec))
       } else {
         cat("  Gaps:          None detected\n")
       }
 
-      if (s$n_duplicates > 0) {
+      if(s$n_duplicates > 0){
         cat(sprintf("  Duplicates:    %d timestamps\n", s$n_duplicates))
       }
 
       cat("\n")
 
-      if (s$qc_pass) {
+      if(s$qc_pass){
         cat("  Status: ✓ PASS\n")
       } else {
         cat("  Status: ✗ ISSUES DETECTED\n")
       }
 
-      if (length(s$issues) > 0) {
+      if(length(s$issues) > 0){
         cat("\n  Issues:\n")
-        for (issue in s$issues) {
+        for(issue in s$issues){
           cat(sprintf("    ✗ %s\n", issue))
         }
       }
 
-      if (length(s$warnings) > 0) {
+      if(length(s$warnings) > 0){
         cat("\n  Warnings:\n")
-        for (warning in s$warnings) {
+        for(warning in s$warnings){
           cat(sprintf("    ⚠ %s\n", warning))
         }
       }
 
+      cat("\n")
+    }
+
+    else if(step_name == "coordinate"){
+      cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
+      cat(sprintf("  Rows:          %s\n", format(s$total_rows, big.mark = ",")))
+      cat("\n")
+
+      # Conversion path
+      cat("  Conversion Path\n")
+      cat(sprintf("    From:        %s\n", s$from))
+      cat(sprintf("    To:          %s\n", s$to))
+      if(isTRUE(s$latlong_to_xyz)){
+        cat("    Method:      Lat/Lng → projected XYZ (via sf)\n")
+      } else {
+        cat("    Method:      XYZ passthrough\n")
+      }
+      cat("\n")
+
+      # CRS
+      cat("  Coordinate Reference System\n")
+      if(!is.na(s$crs_code)){
+        cat(sprintf("    Source CRS:  EPSG:%s (WGS 84)\n", s$crs_source))
+        cat(sprintf("    Target CRS:  EPSG:%s\n", s$crs_target))
+        cat(sprintf("    Description: %s\n", s$crs_description))
+      } else {
+        cat("    CRS:         N/A (local coordinates)\n")
+      }
+      cat("\n")
+
+      # Units
+      cat("  Unit Conversion\n")
+      if(isTRUE(s$units_converted)){
+        cat(sprintf("    Converted:   %s → %s\n", s$from_units, s$to_units))
+      } else {
+        cat(sprintf("    Units:       %s (no conversion applied)\n", s$to_units))
+      }
+      cat("\n")
+
+      # Normalisation
+      cat("  Normalisation\n")
+      if(isTRUE(s$normalised)){
+        cat(sprintf("    Applied:     Yes (%s)\n", s$origin_type))
+      } else {
+        cat("    Applied:     No\n")
+      }
+      cat("\n")
+
+      # Rotation
+      cat("  Rotation\n")
+      if(isTRUE(s$rotated)){
+        cat(sprintf("    Applied:     Yes (%.4f rad / %.2f°)\n",
+                    s$rotation_angle, s$rotation_degrees))
+      } else {
+        cat("    Applied:     No\n")
+      }
+      cat("\n")
+
+      # Z dimension
+      cat("  Dimensions\n")
+      cat(sprintf("    X range:     %.2f %s\n", s$x_range, s$to_units))
+      cat(sprintf("    Y range:     %.2f %s\n", s$y_range, s$to_units))
+      cat(sprintf("    Z data:      %s\n", if(isTRUE(s$z_present)) "Present (non-zero)" else "Absent or zero-filled"))
+      cat("\n")
+
+      # Outliers
+      cat("  Spatial Outliers\n")
+      if(length(s$outliers) == 0){
+        cat("    None detected\n")
+      } else {
+        cat(sprintf("    Total flagged rows: %s (%.1f%%)\n",
+                    format(s$n_outlier_rows, big.mark = ","),
+                    s$n_outlier_rows / s$total_rows * 100))
+        cat("\n")
+        for(ol_name in names(s$outliers)){
+          ol <- s$outliers[[ol_name]]
+          cat(sprintf("    [%s] %s\n", toupper(ol_name), ol$description))
+          cat(sprintf("      Rows affected: %s (%.1f%%)\n",
+                      format(ol$n, big.mark = ","), ol$pct))
+          if(!is.null(ol$bounds)){
+            cat(sprintf("      Bounds:        %.2f to %.2f %s\n",
+                        ol$bounds[1], ol$bounds[2], s$to_units))
+          }
+        }
+      }
+      cat("\n")
+
+      # Dependencies
+      cat("  Package Dependencies\n")
+      for(pkg_name in names(s$dependencies)){
+        cat(sprintf("    %-10s v%s\n", pkg_name, s$dependencies[[pkg_name]]))
+      }
       cat("\n")
     }
   }
@@ -907,11 +996,11 @@ quality_report <- function(.data) {
 
 #' Metadata Report
 #' @export
-metadata_report <- function(.data) {
+metadata_report <- function(.data){
 
   meta <- attr(.data, 'metadata')
 
-  if (is.null(meta)) {
+  if(is.null(meta)){
     cat("No metadata found.\n")
     return(invisible(NULL))
   }
@@ -924,17 +1013,17 @@ metadata_report <- function(.data) {
   cat(sprintf("│ Name:          %-42s │\n", meta$name))
   cat(sprintf("│ Source:        %-42s │\n", meta$source))
 
-  if (!is.na(meta$session_id)) {
+  if(!is.na(meta$session_id)){
     cat(sprintf("│ Session ID:    %-42s │\n", meta$session_id))
   }
 
-  if (!is.na(meta$session_start)) {
+  if(!is.na(meta$session_start)){
     cat(sprintf("│ Date:          %-42s │\n", as.character(meta$session_start)))
   }
 
-  if (!is.na(meta$session_duration_sec)) {
+  if(!is.na(meta$session_duration_sec)){
     duration_min <- meta$session_duration_sec / 60
-    if (duration_min < 60) {
+    if(duration_min < 60){
       cat(sprintf("│ Duration:      %.1f minutes%-30s │\n", duration_min, ""))
     } else {
       duration_hr <- duration_min / 60
@@ -946,26 +1035,26 @@ metadata_report <- function(.data) {
 
   has_athlete_info <- !is.na(meta$player_id) || !is.na(meta$player_name) || !is.na(meta$team)
 
-  if (has_athlete_info) {
+  if(has_athlete_info){
     cat("┌─ ATHLETE INFORMATION ───────────────────────────────────┐\n")
 
-    if (!is.na(meta$player_id)) {
+    if(!is.na(meta$player_id)){
       cat(sprintf("│ Player ID:     %-42s │\n", meta$player_id))
     }
 
-    if (!is.na(meta$player_name)) {
+    if(!is.na(meta$player_name)){
       cat(sprintf("│ Player Name:   %-42s │\n", meta$player_name))
     }
 
-    if (!is.na(meta$team)) {
+    if(!is.na(meta$team)){
       cat(sprintf("│ Team:          %-42s │\n", meta$team))
     }
 
-    if (!is.na(meta$sport)) {
+    if(!is.na(meta$sport)){
       cat(sprintf("│ Sport:         %-42s │\n", meta$sport))
     }
 
-    if (!is.na(meta$session_type)) {
+    if(!is.na(meta$session_type)){
       cat(sprintf("│ Session Type:  %-42s │\n", meta$session_type))
     }
 
@@ -975,22 +1064,22 @@ metadata_report <- function(.data) {
   has_device_info <- !is.na(meta$device_type) || !is.na(meta$device_id) ||
                      !is.na(meta$device_manufacturer)
 
-  if (has_device_info) {
+  if(has_device_info){
     cat("┌─ DEVICE INFORMATION ────────────────────────────────────┐\n")
 
-    if (!is.na(meta$device_type)) {
+    if(!is.na(meta$device_type)){
       cat(sprintf("│ Type:          %-42s │\n", meta$device_type))
     }
 
-    if (!is.na(meta$device_manufacturer)) {
+    if(!is.na(meta$device_manufacturer)){
       cat(sprintf("│ Manufacturer:  %-42s │\n", meta$device_manufacturer))
     }
 
-    if (!is.na(meta$device_id)) {
+    if(!is.na(meta$device_id)){
       cat(sprintf("│ Device ID:     %-42s │\n", meta$device_id))
     }
 
-    if (!is.na(meta$firmware_version)) {
+    if(!is.na(meta$firmware_version)){
       cat(sprintf("│ Firmware:      %-42s │\n", meta$firmware_version))
     }
 
@@ -1002,7 +1091,7 @@ metadata_report <- function(.data) {
   cat(sprintf("│ Coordinate System:  %-35s │\n",
               toupper(meta$coordinate_system)))
 
-  if (!is.na(meta$native_hz)) {
+  if(!is.na(meta$native_hz)){
     cat(sprintf("│ Sample Rate:        %.2f Hz%-28s │\n",
                 meta$native_hz, ""))
     cat(sprintf("│ Sample Interval:    %.3f seconds%-23s │\n",
@@ -1012,16 +1101,16 @@ metadata_report <- function(.data) {
   cat("└─────────────────────────────────────────────────────────┘\n\n")
 
   # COLUMN MAPPING
-  if (!is.null(meta$column_mapping) && meta$source %in% c('guess_csv', 'manual_csv')) {
+  if(!is.null(meta$column_mapping) && meta$source %in% c('guess_csv', 'manual_csv')){
     cat("┌─ COLUMN MAPPING ────────────────────────────────────────┐\n")
 
     mapping <- meta$column_mapping
 
-    for (col_name in names(mapping)) {
+    for(col_name in names(mapping)){
       original <- mapping[[col_name]]
-      if (!is.null(original) && original != "[not specified]") {
+      if(!is.null(original) && original != "[not specified]"){
         cat(sprintf("│ %-14s → %-38s │\n", col_name, original))
-      } else if (original == "[not specified]") {
+      } else if(original == "[not specified]"){
         cat(sprintf("│ %-14s → %-38s │\n", col_name, "[not specified]"))
       } else {
         cat(sprintf("│ %-14s → %-38s │\n", col_name, "[not found]"))
@@ -1043,7 +1132,7 @@ metadata_report <- function(.data) {
 
 #' Full Report
 #' @export
-full_report <- function(.data) {
+full_report <- function(.data){
   cat("\n")
   metadata_report(.data)
   cat("\n")
@@ -1056,26 +1145,26 @@ full_report <- function(.data) {
 
 #' Print Motion Trace
 #' @export
-print.motion_trace <- function(x, ...) {
+print.motion_trace <- function(x, ...){
   meta <- attr(x, 'metadata')
   qual <- attr(x, 'quality')
 
   cat(sprintf("Motion Trace (%s)\n", meta$source))
   cat(sprintf("├─ Session: %s\n", meta$name))
 
-  if (!is.na(meta$player_id)) {
+  if(!is.na(meta$player_id)){
     cat(sprintf("├─ Player:  %s\n", meta$player_id))
   }
 
-  if (!is.na(meta$native_hz)) {
+  if(!is.na(meta$native_hz)){
     cat(sprintf("├─ Sample:  %.1f Hz\n", meta$native_hz))
   }
 
   cat(sprintf("├─ Rows:    %s\n", format(nrow(x), big.mark = ",")))
   cat(sprintf("├─ Columns: %s\n", paste(colnames(x), collapse = ', ')))
 
-  if (!is.null(qual) && !is.null(qual$initiate)) {
-    if (qual$initiate$qc_pass) {
+  if(!is.null(qual) && !is.null(qual$initiate)){
+    if(qual$initiate$qc_pass){
       cat("└─ QC:      ✓ Pass\n")
     } else {
       n_issues <- length(qual$initiate$issues)
@@ -1103,17 +1192,17 @@ initiate <- function(source = 'auto',
                      session = '17134112147',
                      coord_system = 'gps',
                      verbose = TRUE,
-                     ...) {
+                     ...){
 
   # Auto-detect source from file extension
-  if (source == 'auto' && file.exists(session)) {
+  if(source == 'auto' && file.exists(session)){
     ext <- tolower(tools::file_ext(session))
     source <- switch(ext,
       'csv' = 'guess_csv',
       'gpx' = 'gpx',
       stop(sprintf("Unknown file extension: .%s\nSupported: .csv, .gpx", ext))
     )
-    if (verbose) {
+    if(verbose){
       message(sprintf("Auto-detected source: %s", source))
     }
   }
@@ -1121,7 +1210,7 @@ initiate <- function(source = 'auto',
   trace <- switch(source,
     'strava' = {
       session_str <- as.character(session)
-      activity_id <- if (stringr::str_detect(session_str, 'activities/')) {
+      activity_id <- if(stringr::str_detect(session_str, 'activities/')){
         stringr::str_extract(session_str, '(?<=activities/)\\d+')
       } else {
         stringr::str_extract(session_str, '^\\d+$')
@@ -1158,7 +1247,7 @@ initiate <- function(source = 'auto',
     },
 
     'catapult_replay' = {
-      if (!file.exists(session)) {
+      if(!file.exists(session)){
         stop(sprintf("File not found: %s\nCheck path and try again.", session))
       }
 
@@ -1167,7 +1256,7 @@ initiate <- function(source = 'auto',
 
       after_header <- all_lines[(header_idx + 1):length(all_lines)]
       empty_idx <- which(after_header == '')[1]
-      n_rows <- if (is.na(empty_idx)) -1 else empty_idx - 1
+      n_rows <- if(is.na(empty_idx)) -1 else empty_idx - 1
 
       trace_raw <- readr::read_csv(
         session,
@@ -1201,12 +1290,12 @@ initiate <- function(source = 'auto',
         coord_system = 'gps'
       )
 
-      if (length(start_time_raw) > 0 && !is.na(start_time_raw[1])) {
+      if(length(start_time_raw) > 0 && !is.na(start_time_raw[1])){
         parsed_start <- tryCatch({
           lubridate::parse_date_time(start_time_raw[1], orders = c('dmy HMS', 'mdy HMS'))
         }, error = function(e) NA)
 
-        if (!is.na(parsed_start)) {
+        if(!is.na(parsed_start)){
           metadata$session_start <- as.Date(parsed_start)
         }
       }
@@ -1216,7 +1305,7 @@ initiate <- function(source = 'auto',
     },
 
     'guess_csv' = {
-      if (!file.exists(session)) {
+      if(!file.exists(session)){
         stop(sprintf("File not found: %s\nCheck path and try again.", session))
       }
 
@@ -1245,7 +1334,7 @@ initiate <- function(source = 'auto',
     },
 
     'manual_csv' = {
-      if (!file.exists(session)) {
+      if(!file.exists(session)){
         stop(sprintf("File not found: %s\nCheck path and try again.", session))
       }
 
@@ -1274,7 +1363,7 @@ initiate <- function(source = 'auto',
     },
 
     'gpx' = {
-      if (!file.exists(session)) {
+      if(!file.exists(session)){
         stop(sprintf("File not found: %s\nCheck path and try again.", session))
       }
 
@@ -1297,7 +1386,7 @@ initiate <- function(source = 'auto',
   attr(trace, 'quality') <- init_quality_log(trace, source)
 
   class(trace) <- c('motion_trace', class(trace))
-  if (verbose) print(trace)
+  if(verbose) print(trace)
 
   return(trace)
 }

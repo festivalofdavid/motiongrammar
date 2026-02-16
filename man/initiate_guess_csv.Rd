@@ -4,16 +4,9 @@
 \alias{initiate_guess_csv}
 \title{Auto-Detect and Parse Messy CSV Files}
 \usage{
-initiate_guess_csv(.data_path, source = "gps", confidence_threshold = 0.7)
-}
-\arguments{
-\item{.data_path}{String. Path to the CSV file.}
-
-\item{source}{String. Data source type: "gps" (default), "local", or "auto" to guess.}
-
-\item{confidence_threshold}{Numeric. Similarity threshold (0-1) for fuzzy mapping.}
+initiate_guess_csv(.data_path, source = "gps", confidence_threshold = 0.8)
 }
 \description{
-Internal helper that auto-detects kinematic data in unstructured CSVs.
+Auto-Detect and Parse Messy CSV Files
 }
 \keyword{internal}

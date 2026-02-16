@@ -11,7 +11,8 @@ coordinate(
   crs = 3857,
   norm = FALSE,
   from_units = NULL,
-  to_units = "m"
+  to_units = "m",
+  rotate = NULL
 )
 }
 \arguments{
@@ -26,6 +27,8 @@ coordinate(
 \item{from_units}{Character; the units of the source ('m', 'cm', 'mm', 'km', 'ft', 'in', 'yd', 'mi').}
 
 \item{to_units}{Character; the units of the target. Defaults to 'm'.}
+
+\item{rotate}{NULL or a list of two c(lat, lng) vectors defining a sideline. When provided, rotates coordinates so the sideline aligns with the x-axis.}
 }
 \value{
 An object of class \code{motion_trace}.

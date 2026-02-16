@@ -2,20 +2,17 @@
 % Please edit documentation in R/initiate.R
 \name{create_metadata}
 \alias{create_metadata}
-\title{Create Metadata Attribute for Motion Trace}
+\title{Create Metadata}
 \usage{
-create_metadata(session, source, device_info = NULL, coord_system = "gps")
-}
-\arguments{
-\item{session}{File path or session identifier}
-
-\item{source}{Data source type ('strava', 'gpx', 'fit', etc.)}
-
-\item{device_info}{Optional list with device details (auto-extracted if available)}
-
-\item{coord_system}{Coordinate system ('gps' for lat/lng, 'local' for xy)}
+create_metadata(
+  session,
+  source,
+  trace,
+  device_info = NULL,
+  coord_system = "gps"
+)
 }
 \description{
-Internal helper to initialize metadata structure
+Create Metadata
 }
 \keyword{internal}

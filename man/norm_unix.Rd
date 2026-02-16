@@ -2,18 +2,11 @@
 % Please edit documentation in R/initiate.R
 \name{norm_unix}
 \alias{norm_unix}
-\title{Normalise Unix Timestamps to Standard Format}
+\title{Normalise Unix Timestamps}
 \usage{
 norm_unix(unix_vec)
 }
-\arguments{
-\item{unix_vec}{Numeric vector of Unix timestamps}
-}
-\value{
-Numeric vector of normalised Unix timestamps in seconds
-}
 \description{
-Detects and corrects non-standard Unix timestamp formats
-(e.g., milliseconds, centiseconds) to standard seconds since epoch.
+Normalise Unix Timestamps
 }
 \keyword{internal}
