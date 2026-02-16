@@ -4,19 +4,20 @@
 \alias{derivate}
 \title{Calculate Derivatives of Motion}
 \usage{
-derivate(.data, use_filtered = TRUE, window = 5)
+derivate(.data, use_filtered = TRUE, window = 5, speed_floor = 0.5)
 }
 \arguments{
 \item{.data}{A motion_trace object.}
 
 \item{use_filtered}{Logical: if TRUE, uses f_x and f_y. Defaults to TRUE.}
 
-\item{window}{Numeric: give the size of the window to calculate derivatives across}
+\item{window}{Numeric: size of the window (in rows) to calculate \emph{linear} derivatives across.}
+
+\item{speed_floor}{Numeric: speeds below this (m/s) are treated as stationary for heading/omega.}
 }
 \value{
-A \code{motion_trace} object with velocity and acceleration columns.
+A motion_trace with distance, velocity, acceleration, heading, angular_velocity.
 }
 \description{
-Computes linear and angular velocity and acceleration. Defaults to
-using filtered coordinates where possible
+Calculate Derivatives of Motion
 }
