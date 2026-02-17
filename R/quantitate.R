@@ -3,14 +3,16 @@
 #' Quantitate Motion Grammar
 #' @description Aggregates motion data by designation and one or more intensity
 #'   band dimensions. Three scopes control what rows are included and how the
-#'   designation column is used in grouping.
+#'   designation column is used in grouping. Set \code{allocation = NULL} for
+#'   band-free totals.
 #'
 #' @param .data Tibble output from \code{allocate()}.
 #' @param allocation Character; the allocation name used in \code{allocate()}
-#'   (e.g. \code{'allocation_1'}).
+#'   (e.g. \code{'allocation_1'}). Set to \code{NULL} to skip band grouping
+#'   and compute totals within designation segments (or the whole session).
 #' @param derivative Character; one or more derivatives whose bands to group
 #'   by. Any combination of \code{'velocity'}, \code{'acceleration'},
-#'   \code{'angular_velocity'}.
+#'   \code{'angular_velocity'}. Ignored when \code{allocation = NULL}.
 #' @param scope Character; controls grouping and row inclusion:
 #'   \describe{
 #'     \item{\code{'designation'}}{(default) Groups by \code{designation} and
@@ -25,8 +27,9 @@
 #'   rows to segments whose \code{designation} starts with \code{'active_'}.
 #'   Ignored for other scopes. Defaults to \code{FALSE}.
 #' @param ... Summarise expressions passed to \code{dplyr::summarise()}.
-#' @return A summarised tibble grouped by the resolved band columns and,
-#'   when \code{scope = 'designation'}, \code{designation}.
+#' @return A summarised tibble. Grouping columns are \code{designation} (when
+#'   \code{scope = 'designation'}) and/or the resolved band columns (when
+#'   \code{allocation} is provided).
 #' @export
 quantitate <- function(
   .data,
@@ -45,25 +48,29 @@ quantitate <- function(
     angular_velocity = 'angularvelocity_band'
   )
 
-  unknown <- setdiff(derivative, names(suffix_map))
-  if (length(unknown) > 0) {
-    stop(
-      "quantitate(): unknown derivative(s): ",
-      paste(unknown, collapse = ', '),
-      ". Must be one or more of: ",
-      paste(names(suffix_map), collapse = ', ')
-    )
-  }
+  if (!is.null(allocation)) {
+    unknown <- setdiff(derivative, names(suffix_map))
+    if (length(unknown) > 0) {
+      stop(
+        "quantitate(): unknown derivative(s): ",
+        paste(unknown, collapse = ', '),
+        ". Must be one or more of: ",
+        paste(names(suffix_map), collapse = ', ')
+      )
+    }
 
-  band_cols <- paste0(allocation, '_', suffix_map[derivative])
+    band_cols <- paste0(allocation, '_', suffix_map[derivative])
 
-  missing <- setdiff(band_cols, names(.data))
-  if (length(missing) > 0) {
-    stop(
-      "quantitate(): band column(s) not found in data: ",
-      paste(missing, collapse = ', '),
-      ". Run allocate(allocation_name = '", allocation, "') first."
-    )
+    missing <- setdiff(band_cols, names(.data))
+    if (length(missing) > 0) {
+      stop(
+        "quantitate(): band column(s) not found in data: ",
+        paste(missing, collapse = ', '),
+        ". Run allocate(allocation_name = '", allocation, "') first."
+      )
+    }
+  } else {
+    band_cols <- character(0)
   }
 
   # Row filtering
@@ -71,7 +78,8 @@ quantitate <- function(
     .data <- dplyr::filter(.data, grepl('^active_', designation))
   }
 
-  # Grouping
+  # Grouping: designation scope always includes designation column;
+  # session scopes group by bands only (empty = single-row result when NULL).
   group_vars <- if (scope == 'designation') c('designation', band_cols) else band_cols
 
   .data |>
@@ -81,12 +89,15 @@ quantitate <- function(
 
 #' Time in Bands
 #' @description Convenience wrapper around \code{\link{quantitate}} that
-#'   computes the duration spent in each band. Requires interpolated data so
-#'   that each row represents a fixed time interval (derived from the
-#'   \code{interpolation_hz} field in metadata).
+#'   computes the duration spent in each band (or designation segment when
+#'   \code{allocation = NULL}). Requires interpolated data so that each row
+#'   represents a fixed time interval, derived from \code{interpolation_hz}
+#'   in metadata.
 #' @param .data Tibble output from \code{allocate()}.
-#' @param allocation Character; allocation name (e.g. \code{'allocation_1'}).
-#' @param derivative Character; one or more derivatives to group by.
+#' @param allocation Character or \code{NULL}; allocation name. \code{NULL}
+#'   returns duration per designation segment (or whole session).
+#' @param derivative Character; one or more derivatives to group by. Ignored
+#'   when \code{allocation = NULL}.
 #' @param scope Character; \code{'designation'}, \code{'session'}, or
 #'   \code{'active_session'}. See \code{\link{quantitate}}.
 #' @param active_only Logical; passed to \code{\link{quantitate}} when
