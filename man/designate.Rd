@@ -4,14 +4,36 @@
 \alias{designate}
 \title{designate Motion Data}
 \usage{
-designate(.data, v_threshold = 1, min_pts = 300, method = "corbett")
+designate(
+  .data,
+  v_threshold = 0.25,
+  min_pts = NULL,
+  method = "corbett",
+  file = NULL,
+  cols = NULL
+)
 }
 \arguments{
 \item{.data}{Tibble with 'velocity', 'unix_time', and 'is_interpolated'.}
 
 \item{v_threshold}{Velocity (m/s) to distinguish active vs downtime.}
 
-\item{min_pts}{Minimum segment length (e.g., 300 pts = 30s at 10Hz).}
+\item{min_pts}{Minimum segment length in rows. Defaults to 5 seconds
+worth of data based on the sample rate (Hz) in metadata, or 50 rows
+if Hz is unavailable.}
+
+\item{method}{Character; segmentation method. \code{'corbett'} (default) uses
+PELT change-point detection. \code{'manual'} imports user-supplied labels
+from a CSV via \code{file}.}
+
+\item{file}{Path to a CSV with columns \code{designation}, \code{unix_start},
+\code{unix_end}. Required when \code{method = 'manual'}.}
+
+\item{cols}{Column mapping for the manual CSV. \code{NULL} (default) expects
+exact columns \code{designation}, \code{unix_start}, \code{unix_end}.
+A named character vector provides explicit mapping (e.g.
+\code{c(designation = 'label', unix_start = 'start_time', unix_end = 'end_time')}).
+\code{'guess'} uses fuzzy matching to auto-detect columns.}
 }
 \description{
 Finalises segmentation using statistical masking and type-safe combining.

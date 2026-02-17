@@ -988,6 +988,88 @@ quality_report <- function(.data){
       cat("\n")
     }
 
+    else if(step_name == "interpolate"){
+      cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
+      cat(sprintf("  Rows in:       %s\n", format(s$input_rows, big.mark = ",")))
+      cat(sprintf("  Rows out:      %s\n", format(s$total_rows, big.mark = ",")))
+      cat("\n")
+
+      # Method
+      cat("  Method\n")
+      cat(sprintf("    Algorithm:   %s\n", s$method$algorithm))
+      cat(sprintf("    Function:    %s\n", s$method$zoo_fn))
+      cat(sprintf("    Description: %s\n", s$method$description))
+      cat("\n")
+
+      # Parameters
+      cat("  Parameters\n")
+      cat(sprintf("    Hz:              %s\n", s$parameters$hz))
+      cat(sprintf("    Interval:        %s s\n", s$parameters$interval_sec))
+      cat(sprintf("    Max gap frames:  %s\n", s$parameters$max_gap_frames))
+      cat("\n")
+
+      # Grid expansion
+      cat("  Grid Expansion\n")
+      cat(sprintf("    Duration:        %.1f s (%.1f min)\n",
+                  s$duration_sec, s$duration_sec / 60))
+      cat(sprintf("    Expected rows:   %s\n", format(s$expected_rows, big.mark = ",")))
+      cat(sprintf("    Grid rows:       %s\n", format(s$grid_rows, big.mark = ",")))
+      cat(sprintf("    Time gaps added: %s\n", format(s$time_gaps_added, big.mark = ",")))
+      if(s$duplicates_removed > 0){
+        cat(sprintf("    Duplicates removed: %d\n", s$duplicates_removed))
+      }
+      cat(sprintf("    Upstream coord NAs: %d\n", s$coord_na_from_upstream))
+      cat("\n")
+
+      # Gap structure
+      cat("  Gap Structure (pre-interpolation)\n")
+      if(s$gaps$n_gaps > 0){
+        cat(sprintf("    Gaps:        %d\n", s$gaps$n_gaps))
+        cat(sprintf("    Total NA:    %d frames\n", s$gaps$total_missing))
+        cat(sprintf("    Min gap:     %d frames\n", s$gaps$min_gap))
+        cat(sprintf("    Max gap:     %d frames\n", s$gaps$max_gap))
+        cat(sprintf("    Mean gap:    %.2f frames\n", s$gaps$mean_gap))
+        cat(sprintf("    Median gap:  %s frames\n", s$gaps$median_gap))
+        if(!is.null(s$gaps$gaps_exceeding_maxgap) && s$gaps$gaps_exceeding_maxgap > 0){
+          cat(sprintf("    Exceeded max_gap: %d gap(s)\n", s$gaps$gaps_exceeding_maxgap))
+        }
+      } else {
+        cat("    No gaps detected\n")
+      }
+      cat("\n")
+
+      # Interpolation results
+      cat("  Results\n")
+      cat(sprintf("    Interpolated:    %s rows (%.2f%%)\n",
+                  format(s$n_interpolated, big.mark = ","), s$pct_interpolated))
+      cat(sprintf("    Filled x:        %d\n", s$filled$x))
+      cat(sprintf("    Filled y:        %d\n", s$filled$y))
+      if(!is.null(s$filled$z) && s$filled$z > 0){
+        cat(sprintf("    Filled z:        %d\n", s$filled$z))
+      }
+      if(s$remaining_na$x > 0 || s$remaining_na$y > 0){
+        cat(sprintf("    Remaining NAs:   x=%d, y=%d\n",
+                    s$remaining_na$x, s$remaining_na$y))
+      }
+      cat("\n")
+
+      # Issues
+      if(!is.null(s$issues) && length(s$issues) > 0){
+        cat("  Issues:\n")
+        for(issue in s$issues){
+          cat(sprintf("    ⚠ %s\n", issue))
+        }
+        cat("\n")
+      }
+
+      # Dependencies
+      cat("  Package Dependencies\n")
+      for(pkg_name in names(s$dependencies)){
+        cat(sprintf("    %-10s v%s\n", pkg_name, s$dependencies[[pkg_name]]))
+      }
+      cat("\n")
+    }
+
     else if(step_name == "filtrate"){
       n_passes <- length(s$passes)
       cat(sprintf("  Filter passes: %d\n", n_passes))
@@ -1019,6 +1101,136 @@ quality_report <- function(.data){
         cat("    Dependencies\n")
         for(pkg_name in names(p$dependencies)){
           cat(sprintf("      %-10s v%s\n", pkg_name, p$dependencies[[pkg_name]]))
+        }
+        cat("\n")
+      }
+    }
+
+    else if(step_name == "derivate"){
+      cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
+      cat("\n")
+
+      # Coordinate source
+      cat("  Coordinate Source\n")
+      if(s$coordinate_source$used_filtered){
+        cat(sprintf("    Used:        filtered (%s, %s)\n",
+                    s$coordinate_source$x_col, s$coordinate_source$y_col))
+      } else if(s$coordinate_source$requested_filtered){
+        cat(sprintf("    Used:        raw (%s, %s)  [filtrate() not applied]\n",
+                    s$coordinate_source$x_col, s$coordinate_source$y_col))
+      } else {
+        cat(sprintf("    Used:        raw (%s, %s)\n",
+                    s$coordinate_source$x_col, s$coordinate_source$y_col))
+      }
+      cat("\n")
+
+      # Windows
+      p <- s$parameters
+      cat("  Windows\n")
+      cat(sprintf("    Default:          %d rows (1-second period at Hz)\n", p$window_default))
+      cat(sprintf("    velocity:         %d rows\n", p$velocity))
+      cat(sprintf("    acceleration:     %d rows\n", p$acceleration))
+      cat(sprintf("    angular_velocity: %d rows\n", p$angular_velocity))
+      cat("\n")
+
+      # Other parameters
+      cat("  Parameters\n")
+      cat(sprintf("    speed_floor:  %.3f m/s\n", p$speed_floor))
+      cat(sprintf("    signed_omega: %s\n", if(isTRUE(p$signed_omega)) "Yes" else "No"))
+      cat("\n")
+
+      # Output summaries
+      cat("  Output Columns\n")
+      for(col_name in names(s$outputs)){
+        o <- s$outputs[[col_name]]
+        if(!is.na(o$min)){
+          cat(sprintf("    %-20s %s valid  [%.3g, %.3g]  %d NA\n",
+                      col_name, format(o$n_valid, big.mark = ","),
+                      o$min, o$max, o$n_na))
+        } else {
+          cat(sprintf("    %-20s %d NA\n", col_name, o$n_na))
+        }
+      }
+      cat("\n")
+
+      # Issues
+      if(length(s$issues) > 0){
+        cat("  Issues\n")
+        for(issue in s$issues){
+          cat(sprintf("    ⚠ %s\n", issue))
+        }
+        cat("\n")
+      }
+    }
+
+    else if(step_name == "designate"){
+      cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
+      cat("\n")
+
+      if(s$method == 'corbett'){
+        a <- s$algorithm
+        cat("  Method:  Corbett (automated change-point detection)\n\n")
+        cat("  Algorithm\n")
+        cat(sprintf("    Package:      changepoint v%s\n", a$package_version))
+        cat(sprintf("    Function:     cpt.mean()\n"))
+        cat(sprintf("    Segmentation: %s\n", a$segmentation))
+        cat(sprintf("    Penalty:      %s\n", a$penalty))
+        cat(sprintf("    Threshold:    %.3f m/s (active vs downtime)\n", a$v_threshold))
+        cat(sprintf("    Min pts:      %d rows\n", a$min_pts))
+      } else {
+        cat("  Method:  Manual (CSV import)\n\n")
+        cat(sprintf("    File:         %s\n", s$source_file))
+        if(!is.null(s$cols_mapping)){
+          if(identical(s$cols_mapping, 'guess')){
+            cat("    Columns:      auto-guessed\n")
+          } else if(is.character(s$cols_mapping) && !is.null(names(s$cols_mapping))){
+            cat("    Column mapping:\n")
+            for(k in names(s$cols_mapping)){
+              cat(sprintf("      %-14s → %s\n", k, s$cols_mapping[[k]]))
+            }
+          }
+        } else {
+          cat("    Columns:      exact match (no mapping)\n")
+        }
+      }
+      cat("\n")
+
+      cat("  Coverage\n")
+      cat(sprintf("    Rows designated: %s / %s (%.1f%%)\n",
+                  format(s$n_designated, big.mark = ","),
+                  format(s$n_total_rows, big.mark = ","),
+                  s$pct_designated))
+      cat("\n")
+
+      cat(sprintf("  Segments (%d total)\n", s$n_segments))
+      for(seg_name in names(s$segment_counts)){
+        cat(sprintf("    %-20s %s rows\n",
+                    seg_name,
+                    format(as.integer(s$segment_counts[[seg_name]]), big.mark = ",")))
+      }
+      cat("\n")
+    }
+
+    else if(step_name == "allocate"){
+      allocs <- s$allocations
+      cat(sprintf("  Allocations applied: %d\n\n", length(allocs)))
+
+      for(aname in names(allocs)){
+        a <- allocs[[aname]]
+
+        if(identical(a$source, 'csv')){
+          cat(sprintf("  [%s]  imported from: %s\n", aname, basename(a$source_file)))
+        } else {
+          cat(sprintf("  [%s]  defined manually\n", aname))
+        }
+
+        for(deriv in names(a$bands)){
+          b <- a$bands[[deriv]]
+          cat(sprintf("    %-20s %d band%s   %s\n",
+                      deriv,
+                      b$n_bands,
+                      if(b$n_bands == 1) "" else "s",
+                      paste(b$ranges, collapse = ", ")))
         }
         cat("\n")
       }

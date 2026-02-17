@@ -2,22 +2,35 @@
 % Please edit documentation in R/allocate.R
 \name{allocate}
 \alias{allocate}
-\title{Allocate Intensity via Named Profiles}
+\title{Allocate Intensity via Named Allocations}
 \usage{
 allocate(
   .data,
-  profile = list(v_bands = c(0, 2, 4, 6, 8), a_bands = c(0, 1, 2, 3, 4), av_bands = c(0,
-    100, 200, 300, 400)),
-  band_set_name = "profile_1"
+  allocation = list(velocity = c(0, 2, 4, 6, 8), acceleration = c(0, 1, 2, 3, 4),
+    angular_velocity = c(0, 100, 200, 300, 400)),
+  allocation_name = "allocation_1",
+  .source = list(type = "manual", file = NULL)
 )
 }
 \arguments{
-\item{.data}{Tibble with velocity, acceleration, and angular_velocity.}
+\item{.data}{Tibble with \code{velocity}, \code{acceleration}, and/or
+\code{angular_velocity} columns.}
 
-\item{profile}{A named list containing 'v_bands', 'a_bands', and 'av_bands'.}
+\item{allocation}{A named list of numeric breakpoint vectors. Recognised
+keys: \code{velocity}, \code{acceleration}, \code{angular_velocity}.
+Defaults to a standard GPS threshold set.}
 
-\item{band_set_name}{A string to prefix the band columns (default: 'p1').}
+\item{allocation_name}{A string used to prefix the output band columns,
+e.g. \code{'gps_standard'} produces \code{gps_standard_velocity_band}.
+Defaults to \code{'allocation_1'}.}
+}
+\value{
+The input tibble with additional \code{<allocation_name>_<derivative>_band}
+columns.
 }
 \description{
-Assigns data points to bands with custom names to allow multi-set audits.
+Assigns data points to intensity bands using named allocation
+thresholds. Call multiple times with different \code{allocation_name}
+values to layer several allocation schemes onto the same data, or use
+\code{\link{allocate_csv}} to apply multiple profiles from a single file.
 }

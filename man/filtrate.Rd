@@ -2,13 +2,14 @@
 % Please edit documentation in R/filtrate.R
 \name{filtrate}
 \alias{filtrate}
-\title{Filter Motion Trace Noise on xyz coordinates}
+\title{Filter Motion Trace Noise}
 \usage{
 filtrate(
   .data,
   method = "butterworth",
+  target = "coordinates",
   n = 2,
-  cutoff = 0.1,
+  cutoff = 1,
   type = "low",
   window = 5,
   alpha = 0.3,
@@ -21,9 +22,15 @@ filtrate(
 \item{method}{Character; the filtering algorithm. One of
 \code{'butterworth'}, \code{'sma'}, \code{'ema'}, or \code{'savgol'}.}
 
+\item{target}{Character; what to filter. One of \code{'coordinates'}
+(default), \code{'all_derivatives'}, \code{'velocity'},
+\code{'acceleration'}, \code{'angular_velocity'}, or a character vector
+combining any of these (e.g. \code{c('velocity', 'acceleration')}).}
+
 \item{n}{Filter order (Butterworth only).}
 
-\item{cutoff}{Filter frequency (Butterworth only).}
+\item{cutoff}{Cutoff frequency in Hz (Butterworth only). Must be less than
+half the sampling rate (Nyquist frequency).}
 
 \item{type}{Filter type, e.g. \code{'low'} or \code{'high'} (Butterworth only).}
 
@@ -34,8 +41,9 @@ filtrate(
 \item{poly_order}{Integer; polynomial order for Savitzky-Golay filter.}
 }
 \value{
-A filtered \code{motion_trace} object.
+A filtered \code{motion_trace} object with \code{f_} prefixed columns.
 }
 \description{
-Applies digital filters to x, y, and z coordinates to remove GPS jitter.
+Applies digital filters to coordinates or derivative signals (velocity,
+acceleration, angular velocity) to remove noise.
 }

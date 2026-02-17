@@ -4,68 +4,159 @@
 #'
 #' @param .data A motion_trace object.
 #' @param use_filtered Logical: if TRUE, uses f_x and f_y. Defaults to TRUE.
-#' @param window Numeric: size of the window (in rows) to calculate *linear* derivatives across.
+#' @param window Window size in rows. Defaults to the sample rate in Hz
+#'   (i.e. 1-second periods). Pass a single integer to use the same window
+#'   for all derivatives, or a named list to set per-derivative windows:
+#'   \code{list(velocity = 5, acceleration = 10, angular_velocity = 8)}.
+#'   Any derivative not named in the list falls back to the default.
 #' @param speed_floor Numeric: speeds below this (m/s) are treated as stationary for heading/omega.
+#' @param signed_omega Logical: if TRUE, angular velocity retains sign (positive = left/CCW,
+#'   negative = right/CW). Defaults to FALSE (absolute magnitude).
 #'
 #' @return A motion_trace with distance, velocity, acceleration, heading, angular_velocity.
 #' @export
-derivate <- function(.data, use_filtered = TRUE, window = 5, speed_floor = 0.5){
+derivate <- function(.data, use_filtered = TRUE, window = NULL, speed_floor = 0.5, signed_omega = FALSE){
+
+  # Default window = sample rate (1-second periods)
+  meta <- attr(.data, 'metadata')
+  default_window <- meta$interpolation_hz %||% meta$hz %||% meta$sample_rate %||% 5L
+  default_window <- as.integer(max(default_window, 1L))
+
+  # Resolve per-derivative windows
+  if (is.null(window)) {
+    w_vel <- default_window
+    w_ang <- default_window
+    w_acc <- default_window
+  } else if (is.list(window)) {
+    w_vel <- as.integer(window$velocity %||% window$distance %||% default_window)
+    w_ang <- as.integer(window$angular_velocity %||% default_window)
+    w_acc <- as.integer(window$acceleration %||% default_window)
+  } else {
+    w_vel <- as.integer(window)
+    w_ang <- w_vel
+    w_acc <- w_vel
+  }
 
   # Choose columns
   x_col <- "x"
   y_col <- "y"
-  if (use_filtered && all(c("f_x", "f_y") %in% names(.data))) {
-    if (sum(!is.na(.data[["f_x"]])) > 0 && sum(!is.na(.data[["f_y"]])) > 0) {
+  used_filtered <- FALSE
+
+  if (use_filtered) {
+    if (all(c("f_x", "f_y") %in% names(.data)) &&
+        sum(!is.na(.data[["f_x"]])) > 0 &&
+        sum(!is.na(.data[["f_y"]])) > 0) {
       x_col <- "f_x"
       y_col <- "f_y"
+      used_filtered <- TRUE
+    } else {
+      message('filtrate() has not been run -- derivate() is using unfiltered coordinates (x, y).')
     }
   }
 
+  # ---- VELOCITY / DISTANCE / HEADING ----
   out <- .data |>
     dplyr::arrange(unix_time) |>
     dplyr::mutate(
-      # dt definitions
-      dt  = unix_time - dplyr::lag(unix_time, n = window),
-      dt  = dplyr::if_else(dt <= 0 | is.na(dt), NA_real_, dt),
+      .dt_vel = unix_time - dplyr::lag(unix_time, n = w_vel),
+      .dt_vel = dplyr::if_else(.dt_vel <= 0 | is.na(.dt_vel), NA_real_, .dt_vel),
+      .dx_vel = .data[[x_col]] - dplyr::lag(.data[[x_col]], n = w_vel),
+      .dy_vel = .data[[y_col]] - dplyr::lag(.data[[y_col]], n = w_vel),
+      distance = sqrt(.dx_vel^2 + .dy_vel^2),
+      velocity = distance / .dt_vel,
+      heading  = dplyr::if_else(
+        velocity >= speed_floor,
+        atan2(.dy_vel, .dx_vel) * (180 / pi),
+        NA_real_
+      )
+    )
 
-      dt1 = unix_time - dplyr::lag(unix_time, n = 1),
-      dt1 = dplyr::if_else(dt1 <= 0 | is.na(dt1), NA_real_, dt1),
+  # ---- ANGULAR VELOCITY (heading finite difference) ----
+  out <- out |>
+    dplyr::mutate(
+      .dt_ang = unix_time - dplyr::lag(unix_time, n = w_ang),
+      .dt_ang = dplyr::if_else(.dt_ang <= 0 | is.na(.dt_ang), NA_real_, .dt_ang),
+      .dh     = heading - dplyr::lag(heading, n = w_ang),
+      .dh     = ((.dh + 180) %% 360) - 180,
+      angular_velocity = if (signed_omega) .dh / .dt_ang else abs(.dh / .dt_ang)
+    )
 
-      # ---- LINEAR (window-based, as you had it) ----
-      dx = .data[[x_col]] - dplyr::lag(.data[[x_col]], n = window),
-      dy = .data[[y_col]] - dplyr::lag(.data[[y_col]], n = window),
+  # ---- ACCELERATION ----
+  out <- out |>
+    dplyr::mutate(
+      .dt_acc = unix_time - dplyr::lag(unix_time, n = w_acc),
+      .dt_acc = dplyr::if_else(.dt_acc <= 0 | is.na(.dt_acc), NA_real_, .dt_acc),
+      acceleration = (velocity - dplyr::lag(velocity, n = w_acc)) / .dt_acc
+    )
 
-      distance = sqrt(dx^2 + dy^2),
-      velocity = distance / dt,
-
-      # ---- INSTANTANEOUS velocity for HEADING/OMEGA ----
-      dx1 = .data[[x_col]] - dplyr::lag(.data[[x_col]], n = 1),
-      dy1 = .data[[y_col]] - dplyr::lag(.data[[y_col]], n = 1),
-
-      vx1 = dx1 / dt1,
-      vy1 = dy1 / dt1,
-      speed1 = sqrt(vx1^2 + vy1^2),
-
-      # heading in radians ([-pi, pi])
-      heading_rad = dplyr::if_else(speed1 >= speed_floor, atan2(vy1, vx1), NA_real_),
-      heading = heading_rad * 180 / pi,
-
-      # wrapped delta heading (robust to +-pi wrap)
-      dtheta = heading_rad - dplyr::lag(heading_rad, 1),
-      dtheta = atan2(sin(dtheta), cos(dtheta)),
-
-      # angular velocity (rad/s then deg/s)
-      angular_velocity = (dtheta / dt1) * (180 / pi),
-
-      # ---- ACCELERATION (keep your approach; uses window velocity) ----
-      acceleration = (velocity - dplyr::lag(velocity, n = window)) / dt
-    ) |>
-    dplyr::select(-dx, -dy, -dx1, -dy1, -vx1, -vy1, -speed1, -heading_rad, -dtheta) |>
+  # Clean up temporary columns and fill NAs
+  out <- out |>
+    dplyr::select(-dplyr::starts_with('.')) |>
     dplyr::mutate(
       dplyr::across(c(distance, velocity), ~ tidyr::replace_na(., 0)),
       angular_velocity = tidyr::replace_na(angular_velocity, 0),
       angular_velocity = dplyr::if_else(!is.finite(angular_velocity), 0, angular_velocity)
     )
+
+  # ── Quality log ────────────────────────────────────────────────────────────
+  col_summary <- function(x) {
+    x_fin <- x[is.finite(x)]
+    list(
+      n_valid  = length(x_fin),
+      n_na     = sum(is.na(x)),
+      min      = if (length(x_fin) > 0) min(x_fin) else NA_real_,
+      max      = if (length(x_fin) > 0) max(x_fin) else NA_real_
+    )
+  }
+
+  windows_used <- list(velocity = w_vel, angular_velocity = w_ang, acceleration = w_acc)
+  window_default <- meta$interpolation_hz %||% meta$hz %||% meta$sample_rate %||% 5L
+
+  issues <- character(0)
+  if (!used_filtered && use_filtered) {
+    issues <- c(issues, 'Filtered coordinates not available; fell back to raw (x, y).')
+  }
+
+  qual <- attr(out, 'quality')
+  if (is.null(qual)) qual <- list()
+
+  qual$derivate <- list(
+    step      = 'derivate',
+    timestamp = Sys.time(),
+
+    coordinate_source = list(
+      requested_filtered = use_filtered,
+      used_filtered      = used_filtered,
+      x_col              = x_col,
+      y_col              = y_col
+    ),
+
+    parameters = list(
+      window_default   = as.integer(window_default),
+      velocity         = w_vel,
+      acceleration     = w_acc,
+      angular_velocity = w_ang,
+      speed_floor      = speed_floor,
+      signed_omega     = signed_omega
+    ),
+
+    outputs = list(
+      distance         = col_summary(out$distance),
+      velocity         = col_summary(out$velocity),
+      acceleration     = col_summary(out$acceleration),
+      heading          = col_summary(out$heading),
+      angular_velocity = col_summary(out$angular_velocity)
+    ),
+
+    issues = issues
+  )
+
+  attr(out, 'quality') <- qual
+
+  # ── Metadata ───────────────────────────────────────────────────────────────
+  meta$derivate_source   <- if (used_filtered) 'filtered (f_x, f_y)' else 'raw (x, y)'
+  meta$derivate_windows  <- windows_used
+  attr(out, 'metadata') <- meta
 
   out
 }

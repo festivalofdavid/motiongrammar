@@ -79,6 +79,32 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
 
   n_interpolated <- sum(output$is_interpolated, na.rm = TRUE)
 
+  # ---- Issue detection ----
+  pct_interpolated <- round(n_interpolated / nrow(output) * 100, 2)
+  issues <- character(0)
+
+  if (pct_interpolated > 50) {
+    issues <- c(issues, paste0('High interpolation ratio: ', pct_interpolated,
+                               '% of rows are interpolated'))
+  }
+  if (length(gap_lengths) > 0 && max(gap_lengths) > max_gap_frames) {
+    n_unfilled <- sum(gap_lengths > max_gap_frames)
+    issues <- c(issues, paste0(n_unfilled, ' gap(s) exceeded max_gap_frames (',
+                               max_gap_frames, ') and were left as NA'))
+  }
+  if (n_remaining_na_x > 0 || n_remaining_na_y > 0) {
+    issues <- c(issues, paste0('Remaining NAs after interpolation: x=',
+                               n_remaining_na_x, ', y=', n_remaining_na_y))
+  }
+  if (n_duplicates_removed > 0) {
+    issues <- c(issues, paste0(n_duplicates_removed,
+                               ' duplicate timestamps removed during grid rounding'))
+  }
+  if (abs(nrow(output) - expected_rows) > 1) {
+    issues <- c(issues, paste0('Row count mismatch: expected ', expected_rows,
+                               ' rows at ', hz, 'Hz but got ', nrow(output)))
+  }
+
   qual$interpolate <- list(
     step      = "interpolate",
     timestamp = Sys.time(),
@@ -108,15 +134,27 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
     # Interpolation results
     total_rows       = nrow(output),
     n_interpolated   = n_interpolated,
-    pct_interpolated = round(n_interpolated / nrow(output) * 100, 2),
+    pct_interpolated = pct_interpolated,
     filled = list(x = n_filled_x, y = n_filled_y, z = n_filled_z),
     remaining_na = list(x = n_remaining_na_x, y = n_remaining_na_y),
+
+    # Issues
+    issues = if (length(issues) > 0) issues else NULL,
 
     # Dependencies
     dependencies = setNames(dep_versions, interp_deps)
   )
 
   attr(output, 'quality') <- qual
+
+  # ---- Update metadata ----
+  meta <- attr(output, 'metadata')
+  if (is.null(meta)) meta <- list()
+  meta$interpolation_method <- method
+  meta$interpolation_hz     <- hz
+  meta$interpolation_applied <- TRUE
+  attr(output, 'metadata') <- meta
+
   output
 }
 
@@ -187,9 +225,8 @@ interpolate <- function(.data,
   coord_was_na_full <- rep(FALSE, nrow(output))
   coord_was_na_full[!is.na(output$unix_time_orig)] <- coord_was_na
 
-  # flag: TRUE for time-gap rows AND for rows where coordinate set x/y to NA
-  output <- output |>
-    dplyr::mutate(is_interpolated = is.na(unix_time_orig) | coord_was_na_full)
+  # track which rows *needed* interpolation (time-gap inserts or upstream NA coords)
+  needed_interp <- is.na(output$unix_time_orig) | coord_was_na_full
 
   # Measure gap structure before interpolation (consecutive NA runs in x)
   x_na_pre <- is.na(output$x)
@@ -220,6 +257,12 @@ interpolate <- function(.data,
   na_x_after <- sum(is.na(output$x))
   na_y_after <- sum(is.na(output$y))
   na_z_after <- if (has_z) sum(is.na(output$z)) else 0L
+
+  # is_interpolated = row needed filling AND coordinates are now present
+  # rows that still have NA coords (gap too large, edges, no valid lat/lng) stay FALSE
+  coords_present <- !is.na(output$x) & !is.na(output$y)
+  if (has_z) coords_present <- coords_present & !is.na(output$z)
+  output$is_interpolated <- needed_interp & coords_present
 
   # tidy up
   output <- output |>

@@ -7,7 +7,8 @@
 filtrate_cutoff(
   .data,
   method = "butterworth",
-  cutoff_range = c(0.01, 0.5),
+  target = "coordinates",
+  cutoff_range = NULL,
   n_steps = 50,
   axis = "x",
   plot_type = "both",
@@ -15,15 +16,23 @@ filtrate_cutoff(
 )
 }
 \arguments{
-\item{.data}{A motion_trace object with x, y (and optionally z) columns.}
+\item{.data}{A motion_trace object.}
 
 \item{method}{Character; filter method to evaluate (default \code{'butterworth'}).}
 
-\item{cutoff_range}{Numeric length-2; min and max cutoff to sweep.}
+\item{target}{Character; what to analyse. One of \code{'coordinates'}
+(default), \code{'all_derivatives'}, \code{'velocity'},
+\code{'acceleration'}, \code{'angular_velocity'}, or a character vector
+combining any of these.}
+
+\item{cutoff_range}{Numeric length-2; min and max cutoff to sweep (Hz for
+Butterworth; generic parameter range for other methods).}
 
 \item{n_steps}{Integer; number of cutoff values to test.}
 
-\item{axis}{Character; which axis to analyse (\code{'x'}, \code{'y'}, or \code{'z'}).}
+\item{axis}{Character; which coordinate axis to analyse when
+\code{target = 'coordinates'} (\code{'x'}, \code{'y'}, or \code{'z'}).
+Ignored for derivative targets.}
 
 \item{plot_type}{Character; \code{'residual'}, \code{'psd'}, or \code{'both'}.}
 
@@ -31,10 +40,11 @@ filtrate_cutoff(
 (e.g. \code{n}, \code{type} for Butterworth).}
 }
 \value{
-A \code{ggplot} object.
+A \code{ggplot} object (or a patchwork composite when multiple
+signals are analysed).
 }
 \description{
 Runs residual analysis and/or power spectral density estimation on a
-chosen axis and returns a ggplot2 scree/elbow-style plot to help
+chosen signal and returns a ggplot2 scree/elbow-style plot to help
 identify the optimal cutoff frequency.
 }

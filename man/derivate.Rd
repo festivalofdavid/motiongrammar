@@ -4,16 +4,29 @@
 \alias{derivate}
 \title{Calculate Derivatives of Motion}
 \usage{
-derivate(.data, use_filtered = TRUE, window = 5, speed_floor = 0.5)
+derivate(
+  .data,
+  use_filtered = TRUE,
+  window = NULL,
+  speed_floor = 0.5,
+  signed_omega = FALSE
+)
 }
 \arguments{
 \item{.data}{A motion_trace object.}
 
 \item{use_filtered}{Logical: if TRUE, uses f_x and f_y. Defaults to TRUE.}
 
-\item{window}{Numeric: size of the window (in rows) to calculate \emph{linear} derivatives across.}
+\item{window}{Window size in rows. Defaults to the sample rate in Hz
+(i.e. 1-second periods). Pass a single integer to use the same window
+for all derivatives, or a named list to set per-derivative windows:
+\code{list(velocity = 5, acceleration = 10, angular_velocity = 8)}.
+Any derivative not named in the list falls back to the default.}
 
 \item{speed_floor}{Numeric: speeds below this (m/s) are treated as stationary for heading/omega.}
+
+\item{signed_omega}{Logical: if TRUE, angular velocity retains sign (positive = left/CCW,
+negative = right/CW). Defaults to FALSE (absolute magnitude).}
 }
 \value{
 A motion_trace with distance, velocity, acceleration, heading, angular_velocity.

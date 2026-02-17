@@ -4,17 +4,41 @@
 \alias{quantitate}
 \title{Quantitate Motion Grammar}
 \usage{
-quantitate(.data, allocation = "p1", designation = "section", ...)
+quantitate(
+  .data,
+  allocation = "allocation_1",
+  derivative = "velocity",
+  active_only = FALSE,
+  ...
+)
 }
 \arguments{
-\item{.data}{Tibble output from allocate().}
+\item{.data}{Tibble output from \code{allocate()}.}
 
-\item{allocation}{The prefix string used in allocate() (e.g., 'match', 'p1').}
+\item{allocation}{Character; the allocation name used in \code{allocate()}
+(e.g. \code{'allocation_1'}). Must match an existing
+\code{<allocation>_<derivative>_band} column in \code{.data}.}
 
-\item{designation}{The context level: 'section' or 'active'.}
+\item{derivative}{Character; one or more derivatives whose bands to group
+by. Any of \code{'velocity'}, \code{'acceleration'},
+\code{'angular_velocity'}. Accepts a single string or a character vector
+(e.g. \code{c('velocity', 'acceleration')}).}
 
-\item{...}{Expressions to pass to dplyr::summarise().}
+\item{active_only}{Logical; if \code{TRUE}, restricts rows to active
+designation segments only (those whose \code{designation} starts with
+\code{'active_'}). Defaults to \code{FALSE}.}
+
+\item{...}{Summarise expressions passed to \code{dplyr::summarise()}, e.g.
+\code{total_distance = sum(distance, na.rm = TRUE)}.}
+}
+\value{
+A tibble grouped and summarised by \code{designation} and all
+resolved band columns.
 }
 \description{
-A lens-based aggregator that groups by both designation and allocation.
+Aggregates motion data by designation and a chosen intensity
+band dimension. The user picks an allocation set and a derivative; the
+function groups every row by \code{designation} and the corresponding
+\code{<allocation>_<derivative>_band} column, then applies arbitrary
+\code{dplyr::summarise()} expressions.
 }

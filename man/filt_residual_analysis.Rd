@@ -9,6 +9,7 @@ filt_residual_analysis(
   method = "butterworth",
   cutoff_range = c(0.01, 0.5),
   n_steps = 50,
+  hz = NULL,
   ...
 )
 }
@@ -17,14 +18,18 @@ filt_residual_analysis(
 
 \item{method}{Character; filter method to use.}
 
-\item{cutoff_range}{Numeric length-2; min and max cutoff to test.}
+\item{cutoff_range}{Numeric length-2; min and max cutoff to test (Hz for
+Butterworth; generic parameter range for other methods).}
 
 \item{n_steps}{Integer; number of cutoff values to evaluate.}
+
+\item{hz}{Numeric; sampling rate in Hz. Required for Butterworth to convert
+cutoff from Hz to normalised frequency.}
 
 \item{...}{Additional arguments passed to the filter (e.g. n, type).}
 }
 \value{
-A data.frame with columns \code{cutoff} and \code{rms_residual}.
+A data.frame with columns \code{parameter} and \code{rms_residual}.
 }
 \description{
 Applies a filter at each cutoff in a range and computes RMS of residuals.

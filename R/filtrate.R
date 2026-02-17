@@ -45,16 +45,21 @@ filt_savgol <- function(x, window = 5, poly_order = 3) {
 #'
 #' @param x Numeric vector (raw signal).
 #' @param method Character; filter method to use.
-#' @param cutoff_range Numeric length-2; min and max cutoff to test.
+#' @param cutoff_range Numeric length-2; min and max cutoff to test (Hz for
+#'   Butterworth; generic parameter range for other methods).
 #' @param n_steps Integer; number of cutoff values to evaluate.
+#' @param hz Numeric; sampling rate in Hz. Required for Butterworth to convert
+#'   cutoff from Hz to normalised frequency.
 #' @param ... Additional arguments passed to the filter (e.g. n, type).
-#' @return A data.frame with columns \code{cutoff} and \code{rms_residual}.
+#' @return A data.frame with columns \code{parameter} and \code{rms_residual}.
 #' @keywords internal
 filt_residual_analysis <- function(x, method = 'butterworth',
                                    cutoff_range = c(0.01, 0.5),
-                                   n_steps = 50, ...) {
+                                   n_steps = 50, hz = NULL, ...) {
   cutoffs <- seq(cutoff_range[1], cutoff_range[2], length.out = n_steps)
   dots <- list(...)
+
+  nyquist <- if (!is.null(hz)) hz / 2 else NULL
 
   # Track the actual parameter value used for each step
   param_vals <- numeric(n_steps)
@@ -64,9 +69,12 @@ filt_residual_analysis <- function(x, method = 'butterworth',
     filtered <- tryCatch({
       if (method == 'butterworth') {
         if (!requireNamespace('signal', quietly = TRUE)) stop('signal required')
+        if (is.null(nyquist)) stop('hz is required for Butterworth residual analysis')
         n_ord <- dots$n %||% 2
         type  <- dots$type %||% 'low'
-        bf <- signal::butter(n = n_ord, W = co, type = type)
+        W <- co / nyquist
+        if (W <= 0 || W >= 1) return(rep(NA_real_, length(x)))
+        bf <- signal::butter(n = n_ord, W = W, type = type)
         param_vals[i] <<- co
         as.numeric(signal::filtfilt(bf, x))
       } else if (method == 'sma') {
@@ -115,47 +123,98 @@ filt_psd <- function(x, hz) {
   )
 }
 
+# segment name: resolve_target_cols ---
+
+#' Resolve target shorthand to column names
+#'
+#' Maps user-facing target names to actual column names for filtering.
+#'
+#' @param target Character; one of \code{'coordinates'}, \code{'all_derivatives'},
+#'   \code{'velocity'}, \code{'acceleration'}, \code{'angular_velocity'}, or a
+#'   character vector of specific column names.
+#' @param .data A data.frame to check column existence against.
+#' @return A character vector of column names to filter.
+#' @keywords internal
+.resolve_target_cols <- function(target, .data) {
+  deriv_map <- list(
+    velocity         = 'velocity',
+    acceleration     = 'acceleration',
+    angular_velocity = 'angular_velocity'
+  )
+
+  if (length(target) == 1 && target == 'coordinates') {
+    cols <- c('x', 'y')
+    # Only include z if it exists and has real (non-NA) data
+    if ('z' %in% names(.data) && sum(!is.na(.data[['z']])) >= 4) {
+      cols <- c(cols, 'z')
+    }
+    return(cols)
+  }
+
+  if (length(target) == 1 && target == 'all_derivatives') {
+    target <- names(deriv_map)
+  }
+
+  # Expand shorthand names
+  cols <- unname(vapply(target, function(t) {
+    if (t %in% names(deriv_map)) deriv_map[[t]] else t
+  }, character(1)))
+
+  missing <- setdiff(cols, names(.data))
+  if (length(missing) > 0) {
+    stop('Column(s) not found in data: ', paste(missing, collapse = ', '),
+         '. Run derivate() before filtering derivatives.')
+  }
+
+  cols
+}
+
 # segment name: filtrate ---
 
-#' Filter Motion Trace Noise on xyz coordinates
+#' Filter Motion Trace Noise
 #'
 #' @description
-#' Applies digital filters to x, y, and z coordinates to remove GPS jitter.
+#' Applies digital filters to coordinates or derivative signals (velocity,
+#' acceleration, angular velocity) to remove noise.
 #'
 #' @param .data A motion_trace object.
 #' @param method Character; the filtering algorithm. One of
 #'   \code{'butterworth'}, \code{'sma'}, \code{'ema'}, or \code{'savgol'}.
+#' @param target Character; what to filter. One of \code{'coordinates'}
+#'   (default), \code{'all_derivatives'}, \code{'velocity'},
+#'   \code{'acceleration'}, \code{'angular_velocity'}, or a character vector
+#'   combining any of these (e.g. \code{c('velocity', 'acceleration')}).
 #' @param n Filter order (Butterworth only).
-#' @param cutoff Filter frequency (Butterworth only).
+#' @param cutoff Cutoff frequency in Hz (Butterworth only). Must be less than
+#'   half the sampling rate (Nyquist frequency).
 #' @param type Filter type, e.g. \code{'low'} or \code{'high'} (Butterworth only).
 #' @param window Integer; window size for SMA or Savitzky-Golay filters.
 #' @param alpha Numeric; smoothing factor for EMA (0-1).
 #' @param poly_order Integer; polynomial order for Savitzky-Golay filter.
 #'
-#' @return A filtered \code{motion_trace} object.
+#' @return A filtered \code{motion_trace} object with \code{f_} prefixed columns.
 #' @export
 filtrate <- function(.data,
                      method = 'butterworth',
+                     target = 'coordinates',
                      n = 2,
-                     cutoff = 0.1,
+                     cutoff = 1,
                      type = 'low',
                      window = 5,
                      alpha = 0.3,
                      poly_order = 2){
 
-  # Validation: Ensure coordinates exist and have real data
-  if (!all(c('x', 'y') %in% names(.data))) {
-    stop('Coordinates missing. Run coordinate() before filtrate().')
-  }
+  # Resolve which columns to filter
+  target_cols <- .resolve_target_cols(target, .data)
 
-  n_valid_x <- sum(!is.na(.data$x))
-  n_valid_y <- sum(!is.na(.data$y))
-  if (n_valid_x < 4 || n_valid_y < 4) {
-    stop('Not enough valid (non-NA) coordinate data to filter. ',
-         'x has ', n_valid_x, ' and y has ', n_valid_y, ' valid rows.')
+  # Validation: enough non-NA data to filter
+  for (col in target_cols) {
+    n_valid <- sum(!is.na(.data[[col]]))
+    if (n_valid < 4) {
+      stop('Not enough valid (non-NA) data in "', col, '" to filter (',
+           n_valid, ' valid rows).')
+    }
   }
-
-  has_z <- 'z' %in% names(.data)
 
   # Helper: apply a filter function only to non-NA values,
   # preserving NAs in their original positions
@@ -167,55 +226,58 @@ filtrate <- function(.data,
     out
   }
 
-  #  Filter Selection Logic ---
+  # Build the filter function for the chosen method
   if (method == 'butterworth') {
 
-    # Make sure we have signal package installed
     if (!requireNamespace('signal', quietly = TRUE)){
       stop('Package "signal" is required for Butterworth filtering. Please install it.')
     }
 
-    # Run butterworth according to our specifications
-    bf <- signal::butter(n = n, W = cutoff, type = type)
+    meta <- attr(.data, 'metadata')
+    hz <- meta$interpolation_hz %||% meta$hz %||% meta$sample_rate %||% 10
+    nyquist <- hz / 2
+    W <- cutoff / nyquist
+    if (W <= 0 || W >= 1) {
+      stop('Cutoff (', cutoff, ' Hz) must be between 0 and Nyquist (',
+           nyquist, ' Hz) for sampling rate ', hz, ' Hz.')
+    }
 
-    bw_filter <- function(v, ...) as.numeric(signal::filtfilt(bf, v))
-
-    output <- .data |>
-      dplyr::mutate(
-        f_x = safe_filter(x, bw_filter),
-        f_y = safe_filter(y, bw_filter),
-        f_z = if (has_z) safe_filter(z, bw_filter) else 0
-      )
+    bf <- signal::butter(n = n, W = W, type = type)
+    filter_fn <- function(v, ...) as.numeric(signal::filtfilt(bf, v))
+    filter_args <- list()
 
   } else if (method == 'sma') {
 
-    output <- .data |>
-      dplyr::mutate(
-        f_x = safe_filter(x, filt_sma, window = window),
-        f_y = safe_filter(y, filt_sma, window = window),
-        f_z = if (has_z) safe_filter(z, filt_sma, window = window) else 0
-      )
+    filter_fn <- filt_sma
+    filter_args <- list(window = window)
 
   } else if (method == 'ema') {
 
-    output <- .data |>
-      dplyr::mutate(
-        f_x = safe_filter(x, filt_ema, alpha = alpha),
-        f_y = safe_filter(y, filt_ema, alpha = alpha),
-        f_z = if (has_z) safe_filter(z, filt_ema, alpha = alpha) else 0
-      )
+    filter_fn <- filt_ema
+    filter_args <- list(alpha = alpha)
 
   } else if (method == 'savgol') {
 
-    output <- .data |>
-      dplyr::mutate(
-        f_x = safe_filter(x, filt_savgol, window = window, poly_order = poly_order),
-        f_y = safe_filter(y, filt_savgol, window = window, poly_order = poly_order),
-        f_z = if (has_z) safe_filter(z, filt_savgol, window = window, poly_order = poly_order) else 0
-      )
+    filter_fn <- filt_savgol
+    filter_args <- list(window = window, poly_order = poly_order)
 
   } else {
     stop('Method "', method, '" not yet implemented.')
+  }
+
+  # Apply filter to each target column, creating f_ prefixed output
+  # On repeated passes, filter the already-filtered column (f_) if it exists
+  output <- .data
+  for (col in target_cols) {
+    f_col <- paste0('f_', col)
+    source_col <- if (f_col %in% names(output) && sum(!is.na(output[[f_col]])) >= 4) f_col else col
+    output[[f_col]] <- do.call(safe_filter,
+      c(list(vals = output[[source_col]], filter_fn = filter_fn), filter_args))
+  }
+
+  # For coordinates target: ensure f_z exists even when z is absent
+  if (identical(target, 'coordinates') && !('z' %in% names(.data))) {
+    output[['f_z']] <- 0
   }
 
   # Preserve class and update metadata
@@ -225,13 +287,13 @@ filtrate <- function(.data,
 
   # Build parameter list for this filter pass
   filter_params <- switch(method,
-    butterworth = list(n = n, cutoff = cutoff, type = type),
+    butterworth = list(n = n, cutoff_hz = cutoff, type = type),
     sma         = list(window = window),
     ema         = list(alpha = alpha),
     savgol      = list(window = window, poly_order = poly_order)
   )
 
-  output <- filt_quality_log(output, method, filter_params)
+  output <- filt_quality_log(output, method, filter_params, target_cols)
 
   return(output)
 }
@@ -274,9 +336,10 @@ filtrate <- function(.data,
 #' @param output A motion_trace object (post-filtering).
 #' @param method Character; the filter method that was applied.
 #' @param params Named list; the parameters used for this filter pass.
+#' @param target_cols Character vector; the source columns that were filtered.
 #' @return The motion_trace object with updated quality attribute.
 #' @keywords internal
-filt_quality_log <- function(output, method, params) {
+filt_quality_log <- function(output, method, params, target_cols = c('x', 'y', 'z')) {
 
   qual <- attr(output, 'quality')
   if (is.null(qual)) qual <- list()
@@ -297,7 +360,8 @@ filt_quality_log <- function(output, method, params) {
   }, character(1))
 
   # Compute summary stats on the filtered columns
-  axes_filtered <- intersect(c('f_x', 'f_y', 'f_z'), names(output))
+  f_cols <- paste0('f_', target_cols)
+  axes_filtered <- intersect(f_cols, names(output))
   na_counts <- vapply(axes_filtered, function(col) {
     sum(is.na(output[[col]]))
   }, integer(1))
@@ -307,6 +371,7 @@ filt_quality_log <- function(output, method, params) {
     method     = method,
     timestamp  = Sys.time(),
     parameters = params,
+    target          = target_cols,
     axes_filtered   = axes_filtered,
     na_introduced   = na_counts,
     total_rows      = nrow(output),
@@ -335,23 +400,32 @@ filt_quality_log <- function(output, method, params) {
 #' Visualise optimal cutoff frequency for filtering
 #'
 #' Runs residual analysis and/or power spectral density estimation on a
-#' chosen axis and returns a ggplot2 scree/elbow-style plot to help
+#' chosen signal and returns a ggplot2 scree/elbow-style plot to help
 #' identify the optimal cutoff frequency.
 #'
-#' @param .data A motion_trace object with x, y (and optionally z) columns.
+#' @param .data A motion_trace object.
 #' @param method Character; filter method to evaluate (default \code{'butterworth'}).
-#' @param cutoff_range Numeric length-2; min and max cutoff to sweep.
+#' @param target Character; what to analyse. One of \code{'coordinates'}
+#'   (default), \code{'all_derivatives'}, \code{'velocity'},
+#'   \code{'acceleration'}, \code{'angular_velocity'}, or a character vector
+#'   combining any of these.
+#' @param cutoff_range Numeric length-2; min and max cutoff to sweep (Hz for
+#'   Butterworth; generic parameter range for other methods).
 #' @param n_steps Integer; number of cutoff values to test.
-#' @param axis Character; which axis to analyse (\code{'x'}, \code{'y'}, or \code{'z'}).
+#' @param axis Character; which coordinate axis to analyse when
+#'   \code{target = 'coordinates'} (\code{'x'}, \code{'y'}, or \code{'z'}).
+#'   Ignored for derivative targets.
 #' @param plot_type Character; \code{'residual'}, \code{'psd'}, or \code{'both'}.
 #' @param ... Additional arguments passed to the underlying filter
 #'   (e.g. \code{n}, \code{type} for Butterworth).
 #'
-#' @return A \code{ggplot} object.
+#' @return A \code{ggplot} object (or a patchwork composite when multiple
+#'   signals are analysed).
 #' @export
 filtrate_cutoff <- function(.data,
                               method = 'butterworth',
-                              cutoff_range = c(0.01, 0.5),
+                              target = 'coordinates',
+                              cutoff_range = NULL,
                               n_steps = 50,
                               axis = 'x',
                               plot_type = 'both',
@@ -361,86 +435,109 @@ filtrate_cutoff <- function(.data,
     stop('Package "ggplot2" is required for filtrate_cutoff(). Please install it.')
   }
 
-  if (!all(c('x', 'y') %in% names(.data))) {
-    stop('Coordinates missing. Run coordinate() before filtrate_cutoff().')
-  }
-
-  if (!(axis %in% names(.data))) {
-    stop('Axis "', axis, '" not found in data.')
-  }
-
-  signal_vec <- .data[[axis]]
-  signal_vec <- signal_vec[!is.na(signal_vec)]
-
   # Determine sampling rate from metadata or timestamps
   meta <- attr(.data, 'metadata')
-  hz <- meta$hz %||% meta$sample_rate %||% 10
+  hz <- meta$interpolation_hz %||% meta$hz %||% meta$sample_rate %||% 10
+
+  # Default cutoff range based on method and sampling rate
+  if (is.null(cutoff_range)) {
+    if (method == 'butterworth') {
+      nyquist <- hz / 2
+      cutoff_range <- c(0.1, nyquist * 0.95)
+    } else {
+      cutoff_range <- c(0.01, 0.5)
+    }
+  }
+
+  # Determine which columns to analyse
+  if (identical(target, 'coordinates')) {
+    signal_cols <- axis
+    if (!(axis %in% names(.data))) {
+      stop('Axis "', axis, '" not found in data.')
+    }
+  } else {
+    signal_cols <- .resolve_target_cols(target, .data)
+  }
 
   # Determine x-axis label based on method
   param_label <- switch(method,
-    butterworth = 'Cutoff Frequency',
+    butterworth = 'Cutoff Frequency (Hz)',
     sma         = 'Window Size',
     ema         = 'Alpha (Smoothing Factor)',
     savgol      = 'Window Size',
     'Parameter'
   )
 
-  plots <- list()
+  # Build plots for each signal column
+  all_plots <- list()
 
-  # Residual analysis
-  if (plot_type %in% c('residual', 'both')) {
-    res_df <- filt_residual_analysis(signal_vec,
-                                     method = method,
-                                     cutoff_range = cutoff_range,
-                                     n_steps = n_steps,
-                                     ...)
+  for (sig_col in signal_cols) {
+    signal_vec <- as.numeric(.data[[sig_col]])
+    signal_vec <- signal_vec[!is.na(signal_vec)]
 
-    # Estimate ideal cutoff via inflection point (max absolute second derivative)
-    ideal <- .est_inflection(res_df$parameter, res_df$rms_residual)
+    col_label <- gsub('_', ' ', sig_col)
+    plots <- list()
 
-    plots$residual <- ggplot2::ggplot(res_df, ggplot2::aes(x = parameter, y = rms_residual)) +
-      ggplot2::geom_line() +
-      ggplot2::geom_point(size = 1) +
-      ggplot2::geom_vline(xintercept = ideal, linetype = 'dashed', colour = 'red') +
-      ggplot2::annotate('text', x = ideal, y = max(res_df$rms_residual, na.rm = TRUE),
-                        label = paste0('Suggested: ', round(ideal, 4)),
-                        hjust = -0.1, vjust = 1, colour = 'red', size = 3.5) +
-      ggplot2::labs(
-        title = 'Residual Analysis',
-        x = param_label,
-        y = 'RMS Residual'
-      ) +
-      ggplot2::theme_minimal()+
-      ggplot2::theme(panel.grid = element_blank())
-  }
+    # Residual analysis
+    if (plot_type %in% c('residual', 'both')) {
+      res_df <- filt_residual_analysis(signal_vec,
+                                       method = method,
+                                       cutoff_range = cutoff_range,
+                                       n_steps = n_steps,
+                                       hz = hz,
+                                       ...)
 
-  # Power spectral density
-  if (plot_type %in% c('psd', 'both')) {
-    psd_df <- filt_psd(signal_vec,
-                       hz = hz)
+      ideal <- .est_inflection(res_df$parameter, res_df$rms_residual)
 
-    plots$psd <- ggplot2::ggplot(psd_df,
-                                 ggplot2::aes(x = frequency,
-                                                      y = power)) +
-      ggplot2::geom_line() +
-      ggplot2::scale_y_log10() +
-      ggplot2::labs(
-        title = 'Power Spectral Density',
-        x = 'Frequency (Hz)',
-        y = 'Power'
-      ) +
-      ggplot2::theme_minimal()+
-      ggplot2::theme(panel.grid = element_blank())
-  }
-
-  # Return single or faceted plot
-  if (plot_type == 'both') {
-    if (!requireNamespace('patchwork', quietly = TRUE)) {
-      message('Install "patchwork" for side-by-side plots. Returning residual plot only.')
-      return(plots$residual)
+      plots$residual <- ggplot2::ggplot(res_df, ggplot2::aes(x = parameter, y = rms_residual)) +
+        ggplot2::geom_line() +
+        ggplot2::geom_point(size = 1) +
+        ggplot2::geom_vline(xintercept = ideal, linetype = 'dashed', colour = 'red') +
+        ggplot2::annotate('text', x = ideal, y = max(res_df$rms_residual, na.rm = TRUE),
+                          label = paste0('Suggested: ', round(ideal, 4)),
+                          hjust = -0.1, vjust = 1, colour = 'red', size = 3.5) +
+        ggplot2::labs(
+          title = paste0('Residual Analysis - ', col_label),
+          x = param_label,
+          y = 'RMS Residual'
+        ) +
+        ggplot2::theme_minimal()+
+        ggplot2::theme(panel.grid = ggplot2::element_blank())
     }
-    return(plots$residual + plots$psd + patchwork::plot_layout(ncol = 2))
+
+    # Power spectral density
+    if (plot_type %in% c('psd', 'both')) {
+      psd_df <- filt_psd(signal_vec, hz = hz)
+
+      plots$psd <- ggplot2::ggplot(psd_df,
+                                   ggplot2::aes(x = frequency, y = power)) +
+        ggplot2::geom_line() +
+        ggplot2::scale_y_log10() +
+        ggplot2::labs(
+          title = paste0('Power Spectral Density - ', col_label),
+          x = 'Frequency (Hz)',
+          y = 'Power'
+        ) +
+        ggplot2::theme_minimal()+
+        ggplot2::theme(panel.grid = ggplot2::element_blank())
+    }
+
+    if (plot_type == 'both') {
+      all_plots <- c(all_plots, list(plots$residual), list(plots$psd))
+    } else {
+      all_plots <- c(all_plots, list(plots[[1]]))
+    }
   }
 
-  plots[[1]]
+  # Single plot -- return directly
+  if (length(all_plots) == 1) return(all_plots[[1]])
+
+  # Multiple plots -- compose with patchwork
+  if (!requireNamespace('patchwork', quietly = TRUE)) {
+    message('Install "patchwork" for composite plots. Returning first plot only.')
+    return(all_plots[[1]])
+  }
+
+  ncol_layout <- if (plot_type == 'both') 2L else min(length(all_plots), 3L)
+  Reduce('+', all_plots) + patchwork::plot_layout(ncol = ncol_layout)
 }
