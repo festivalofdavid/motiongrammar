@@ -1,1 +1,7 @@
 .Rproj.user
+*.csv
+test*
+*test
+E_explore/*
+Rplots.pdf
+*.pdf
