@@ -1,0 +1,100 @@
+# motiongrammar
+
+## Background
+motiongrammar is a Tidyverse-native R package designed to process raw GPS and Local Positioning System (LPS) data into a structured 'grammar' of movement.
+
+I built this package with the following in mind:
+1. Inspired by hassles in my PhD, I wanted to create a package that cleans files from different providers with ease.
+2. Leading on from this, I wanted to create a standardised structure for locational tracking data, to easily calculate analyse and visualise.
+3. Create a more intuitive interface for the tasks I struggled with as a student. Specifically, transforming latitude and longitude to (x,y) coordinates and applying biomechanical filters.
+4. Integrate academic work, such as _Alice Sweeting's angular velocity_ or my own _time series segmentation_ so that scientists can easily explore methods used in other sports and papers.
+5. Offer a tidyverse style pipeline for tracking data- having relied upon cumbersome loops left to run over night on my 2016 Macbook (only to have them crash), I wanted a coding philosophy that is clean and returns more intuitive errors if encountered.
+6. Offer a unified wrapper for commonly used packages in Academic tracking tasks (ie., signal, zoo). 
+7. Improve reproducibility - Academics often don't reference the exact packages they used for each step. creating a messy audit trail. I wanted a package to automatically record this.
+8. To educate - _motiongrammar_ is deliberately a dorky pun combining the idea of a "grammar of motion" (a la Hadley Wickham's ggplot2) with Motion Grammar (a school). My mentor Alice always said that the best way to learn is on your own data. My hope is that this package encourages students to do so, and makes some of the concepts I struggled with (for example low pass filters) much more accessible.
+
+## The motion_trace class
+_motiongrammar_ introduces a new class "motion_trace". It includes the following:
+1. .data - this works as a standard tidyverse style tibble. It is capable of storing coordinates, derivatives and custom user metrics as a time-series.
+2. quality - this attribute tracks everything the user does on _.data___ including package versions, filters, calculations etc. The aim here is to help with clearer and more reproducible methods sections.
+3. meta - this attribute tracks any information the Scientist may wish to store, including playerid, column mappings, session_start time etc.
+
+## The "Ate" Pipeline
+_motiongrammar_ verbs all end with "ate". They are designed to be performed in the following order (albeit -- filtrate() can also be performed on derivatives, since I know some scientists prefer it that way.)
+
+**1. initiate():**
+- Ingest raw data from gpx, csv or strava files.
+- Ability to guess csv structure using fuzzy logic.
+- User can create csv templates that can be saved for easy import.
+- Designed to handle inconsonsistent file formats, headings not beginning in first row etc.
+
+**2. coordinate():**
+- Projects Lat/Lng to local (x,y) coordinates.
+- Handles conversion between metric and imperial measurement systems.
+- Allows field rotation (currently experimental -- I haven't really used this yet or tested it extensively)
+
+**3. filtrate():**
+- Smooths noise. Currently supports simple moving averages, exponential moving averages, butterworth high and low pass filters and savgol filters.
+- Includes helper functions to identify filter cut off frequency
+
+**4. interpolate():**
+- Fills gaps on a fixed Hz grid with an is_interpolated flag.
+
+**5. derivate():** 
+- Calculates distance, velocity, acceleration and anguler velocity (dot product method) as standard time-series within user specified windows.
+- Experimental time-series for jerk (further derivative of acceleration. I have this for future proofing but personally think there is no way scientists should be using this on lower fidelity data like GPS or even optical systems.)
+- Experimental time-series for lateral-g (combined acceleration and angular velocity. Again, pretty experimental and wouldn't recommend. But it's there for completion sake.)
+
+**6. designate():**
+- Segments the session (e.g., 'Drill 1', 'Match') via PELT change-point detection from my PhD.
+- Allows users to import their own designations (ie., drill start and end time, period 1 start and end time etc.)
+
+**7.allocate():** 
+- Maps data points to custom intensity bands.
+- Support for multiple bands at once (so you could have one band set thats absolute, one thats relative, one using Sweeting's clustering method etc.)
+
+**8. quantitate():**
+- A wrapper for summarise in dplyr, where user can calculate aggregate parameters.
+
+**9. elaborate:**
+- Scientists can create their own custom columns, or keep columns from their csv/provider. For example, PlayerLoad, MetabolicPower etc.
+
+## Key Academic Features
+
+### The Interpolation Flag
+Most GPS software fills gaps silently. motiongrammar adds a logical is_interpolated column. If a coordinate was generated by a spline or linear fit rather than a sensor, you'll know about it—allowing you to exclude 'synthetic' data from high-intensity analysis.
+
+### Metadata Persistence
+Using the elaborate() function (our wrapper for mutate), you can add custom columns to your trace without stripping the S3 class or the underlying quality logs.
+
+## Installation
+R
+### Note: This is currently in dev!
+
+```
+remotes::install_github('yourusername/motiongrammar')
+Quick Start
+R
+require('motiongrammar')
+```
+
+## A standard processing flow
+```
+trace <- initiate('session_01.csv', source = 'manual_csv') |>
+  coordinate(to = 'xyz', norm = TRUE) |>
+  filtrate(method = 'savgol', window = 7) |>
+  interpolate(method = 'spline', hz = 10) |>
+  derivate(derivatives = 'all') |>
+  designate(method = 'corbett') |>
+  allocate(allocation_name = 'squad_standards') |>
+  quantitate(scope = 'designation')
+```
+## Current Status & Known Issues
+What's not in v1.0
+- Visualisation Layer: I have intentionally left out plot_trace() or plot_bands(). The data is returned as a tidy tibble; use ggplot2 directly so you aren't restricted by my aesthetic choices.
+- Z-Axis Support: While the infrastructure for 3D coordinates exists in the code, the derivate functions currently focus on 2D planar motion.
+
+## Known Quirks
+- The 'Leaky' Attribute: dplyr joins (like left_join) will still strip the motion_trace attributes. Use elaborate() for mutations and handle joins with care, re-assigning the class if necessary.
+- Interpolation Row-Drop: If your max_gap_frames is too tight, you will see NA values in coordinates. This isn't a bug—it's the package refusing to guess where an athlete was during a 30-second signal loss.
+- Savitzky-Golay Windowing: The filtrate function requires an odd window length. Passing an even number will currently cause an error from the underlying signal package.
