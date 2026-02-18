@@ -20,6 +20,8 @@
 #' @param n_remaining_na_x Integer; x NAs still remaining after interpolation.
 #' @param n_remaining_na_y Integer; y NAs still remaining after interpolation.
 #' @param gap_lengths Integer vector; lengths of each consecutive NA run (pre-interpolation).
+#' @param passthrough_na_counts Named integer vector; for each non-coordinate column present
+#'   in the input, the number of NAs introduced in time-gap rows inserted by grid expansion.
 #' @return The motion_trace object with updated quality attribute.
 #' @keywords internal
 interp_quality_log <- function(output, method, hz, max_gap_frames,
@@ -27,7 +29,7 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
                                 n_grid_rows, n_time_gaps, n_coord_na,
                                 n_filled_x, n_filled_y, n_filled_z,
                                 n_remaining_na_x, n_remaining_na_y,
-                                gap_lengths) {
+                                gap_lengths, passthrough_na_counts = integer(0)) {
 
   qual <- attr(output, 'quality')
   if (is.null(qual)) qual <- list()
@@ -104,6 +106,15 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
     issues <- c(issues, paste0('Row count mismatch: expected ', expected_rows,
                                ' rows at ', hz, 'Hz but got ', nrow(output)))
   }
+  if (length(passthrough_na_counts) > 0 && n_time_gaps > 0) {
+    affected <- names(passthrough_na_counts)[passthrough_na_counts > 0]
+    if (length(affected) > 0) {
+      issues <- c(issues, paste0(
+        length(affected), ' passthrough column(s) have NAs for ', n_time_gaps,
+        ' inserted time-gap row(s): ', paste(affected, collapse = ', ')
+      ))
+    }
+  }
 
   qual$interpolate <- list(
     step      = "interpolate",
@@ -138,6 +149,20 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
     filled = list(x = n_filled_x, y = n_filled_y, z = n_filled_z),
     remaining_na = list(x = n_remaining_na_x, y = n_remaining_na_y),
 
+    # Passthrough columns (non-coordinate columns not interpolated)
+    passthrough_columns = if (length(passthrough_na_counts) > 0) {
+      list(
+        note = paste0(
+          "Only x/y/z coordinates are interpolated. Non-coordinate columns are carried ",
+          "through as-is: ", n_time_gaps, " row(s) inserted to fill time gaps receive NA ",
+          "for all passthrough columns."
+        ),
+        na_counts_from_gaps = as.list(passthrough_na_counts)
+      )
+    } else {
+      list(note = "No passthrough columns present.", na_counts_from_gaps = list())
+    },
+
     # Issues
     issues = if (length(issues) > 0) issues else NULL,
 
@@ -168,18 +193,33 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
 #'
 #' @param .data A motion_trace object.
 #' @param method String; 'linear' (default), 'spline', or 'constant'.
-#' @param hz Numeric; the recording frequency (e.g., 1, 10, 18). Default 1.
+#' @param hz Numeric; the recording frequency (e.g., 1, 10, 18). When \code{NULL}
+#'   (default), the value is read from \code{meta$native_hz} set by \code{initiate()}.
+#'   Falls back to 1 Hz with a message if not available. Pass an explicit value to
+#'   override.
 #' @param max_gap_frames Integer; gaps larger than this (in frames) are left as NA.
 #'
 #' @return An interpolated \code{motion_trace} object.
 #' @export
 interpolate <- function(.data,
                         method = 'linear',
-                        hz = 1,
+                        hz = NULL,
                         max_gap_frames = 5){
 
   validate_motion_trace(.data, 'interpolate')
   n_input_rows <- nrow(.data)
+
+  # Resolve hz: prefer explicit arg, then metadata, then fall back to 1
+  if (is.null(hz)) {
+    meta_hz <- attr(.data, 'metadata')$native_hz
+    if (!is.null(meta_hz) && !is.na(meta_hz) && meta_hz > 0) {
+      hz <- meta_hz
+      message(sprintf('interpolate(): using hz = %g from metadata (native_hz). Pass hz explicitly to override.', hz))
+    } else {
+      hz <- 1
+      message('interpolate(): hz not specified and not found in metadata — defaulting to hz = 1. If your data has a higher sample rate, pass hz explicitly (e.g. hz = 10).')
+    }
+  }
 
   # Calculate expected interval in seconds
   # e.g., 10Hz = 0.1s interval (due to working with unixtime)
@@ -198,6 +238,11 @@ interpolate <- function(.data,
   output <- output |>
     dplyr::filter(!duplicated(unix_time))
   n_duplicates_removed <- n_before_dedup - nrow(output)
+
+  # Capture passthrough columns before grid expansion.
+  # Only x/y/z are interpolated; every other column gets NAs for inserted time-gap rows.
+  interp_coord_cols <- c('x', 'y', 'z', 'unix_time', 'unix_time_orig', 'is_interpolated')
+  passthrough_cols  <- setdiff(names(output), interp_coord_cols)
 
   # this is our dense grid-- so gapless
   full_seq <- data.frame(
@@ -219,6 +264,17 @@ interpolate <- function(.data,
     dplyr::arrange(unix_time)
 
   n_time_gaps <- sum(is.na(output$unix_time_orig))
+
+  # Count NAs introduced in inserted rows per passthrough column.
+  # Inserted rows are those where unix_time_orig is NA (they came from full_seq, not the input).
+  if (n_time_gaps > 0L && length(passthrough_cols) > 0L) {
+    inserted_mask <- is.na(output$unix_time_orig)
+    passthrough_na_counts <- vapply(passthrough_cols, function(col) {
+      sum(is.na(output[[col]][inserted_mask]))
+    }, integer(1))
+  } else {
+    passthrough_na_counts <- setNames(integer(length(passthrough_cols)), passthrough_cols)
+  }
 
   # extend the coord_was_na flag to cover the newly inserted rows
   # original rows keep their flag; inserted (time-gap) rows are FALSE
@@ -285,7 +341,8 @@ interpolate <- function(.data,
     n_filled_z         = na_z_before - na_z_after,
     n_remaining_na_x   = na_x_after,
     n_remaining_na_y   = na_y_after,
-    gap_lengths        = gap_lengths
+    gap_lengths           = gap_lengths,
+    passthrough_na_counts = passthrough_na_counts
   )
 
   return(output)

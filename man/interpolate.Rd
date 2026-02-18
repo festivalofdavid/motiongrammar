@@ -4,14 +4,17 @@
 \alias{interpolate}
 \title{Repair timeline gaps}
 \usage{
-interpolate(.data, method = "linear", hz = 1, max_gap_frames = 5)
+interpolate(.data, method = "linear", hz = NULL, max_gap_frames = 5)
 }
 \arguments{
 \item{.data}{A motion_trace object.}
 
 \item{method}{String; 'linear' (default), 'spline', or 'constant'.}
 
-\item{hz}{Numeric; the recording frequency (e.g., 1, 10, 18). Default 1.}
+\item{hz}{Numeric; the recording frequency (e.g., 1, 10, 18). When \code{NULL}
+(default), the value is read from \code{meta$native_hz} set by \code{initiate()}.
+Falls back to 1 Hz with a message if not available. Pass an explicit value to
+override.}
 
 \item{max_gap_frames}{Integer; gaps larger than this (in frames) are left as NA.}
 }

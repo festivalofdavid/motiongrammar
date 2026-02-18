@@ -812,7 +812,7 @@ init_quality_log <- function(trace, source){
     }
   }
 
-  if(source %in% c('strava', 'guess_csv', 'catapult_replay', 'manual_csv', 'gpx') &&
+  if(source %in% c('strava', 'guess_csv', 'catapult_replay', 'manual_csv', 'gpx', 'template_csv') &&
      'lat' %in% names(trace) && 'lng' %in% names(trace)){
     lat_range <- diff(range(trace$lat, na.rm = TRUE))
     lng_range <- diff(range(trace$lng, na.rm = TRUE))
@@ -1365,128 +1365,124 @@ metadata_report <- function(.data){
   cat("            MOTION TRACE METADATA REPORT                   \n")
   cat("═══════════════════════════════════════════════════════════\n\n")
 
-  cat("┌─ SESSION INFORMATION ───────────────────────────────────┐\n")
-  cat(sprintf("│ Name:          %-42s │\n", meta$name))
-  cat(sprintf("│ Source:        %-42s │\n", meta$source))
+  cat("SESSION INFORMATION ────────────────────────────────────\n")
+  cat(sprintf("  Name:          %s\n", meta$name))
+  cat(sprintf("  Source:        %s\n", meta$source))
 
   if(!is.na(meta$session_id)){
-    cat(sprintf("│ Session ID:    %-42s │\n", meta$session_id))
+    cat(sprintf("  Session ID:    %s\n", meta$session_id))
   }
 
   if(!is.na(meta$session_start)){
-    cat(sprintf("│ Date:          %-42s │\n", as.character(meta$session_start)))
+    cat(sprintf("  Date:          %s\n", as.character(meta$session_start)))
   }
 
   if(!is.na(meta$session_duration_sec)){
     duration_min <- meta$session_duration_sec / 60
     if(duration_min < 60){
-      cat(sprintf("│ Duration:      %.1f minutes%-30s │\n", duration_min, ""))
+      cat(sprintf("  Duration:      %.1f minutes\n", duration_min))
     } else {
       duration_hr <- duration_min / 60
-      cat(sprintf("│ Duration:      %.1f hours%-32s │\n", duration_hr, ""))
+      cat(sprintf("  Duration:      %.1f hours\n", duration_hr))
     }
   }
 
-  cat("└─────────────────────────────────────────────────────────┘\n\n")
+  cat("\n")
 
   has_athlete_info <- !is.na(meta$player_id) || !is.na(meta$player_name) || !is.na(meta$team)
 
   if(has_athlete_info){
-    cat("┌─ ATHLETE INFORMATION ───────────────────────────────────┐\n")
+    cat("ATHLETE INFORMATION ────────────────────────────────────\n")
 
     if(!is.na(meta$player_id)){
-      cat(sprintf("│ Player ID:     %-42s │\n", meta$player_id))
+      cat(sprintf("  Player ID:     %s\n", meta$player_id))
     }
 
     if(!is.na(meta$player_name)){
-      cat(sprintf("│ Player Name:   %-42s │\n", meta$player_name))
+      cat(sprintf("  Player Name:   %s\n", meta$player_name))
     }
 
     if(!is.na(meta$team)){
-      cat(sprintf("│ Team:          %-42s │\n", meta$team))
+      cat(sprintf("  Team:          %s\n", meta$team))
     }
 
     if(!is.na(meta$sport)){
-      cat(sprintf("│ Sport:         %-42s │\n", meta$sport))
+      cat(sprintf("  Sport:         %s\n", meta$sport))
     }
 
     if(!is.na(meta$session_type)){
-      cat(sprintf("│ Session Type:  %-42s │\n", meta$session_type))
+      cat(sprintf("  Session Type:  %s\n", meta$session_type))
     }
 
-    cat("└─────────────────────────────────────────────────────────┘\n\n")
+    cat("\n")
   }
 
   has_device_info <- !is.na(meta$device_type) || !is.na(meta$device_id) ||
                      !is.na(meta$device_manufacturer)
 
   if(has_device_info){
-    cat("┌─ DEVICE INFORMATION ────────────────────────────────────┐\n")
+    cat("DEVICE INFORMATION ─────────────────────────────────────\n")
 
     if(!is.na(meta$device_type)){
-      cat(sprintf("│ Type:          %-42s │\n", meta$device_type))
+      cat(sprintf("  Type:          %s\n", meta$device_type))
     }
 
     if(!is.na(meta$device_manufacturer)){
-      cat(sprintf("│ Manufacturer:  %-42s │\n", meta$device_manufacturer))
+      cat(sprintf("  Manufacturer:  %s\n", meta$device_manufacturer))
     }
 
     if(!is.na(meta$device_id)){
-      cat(sprintf("│ Device ID:     %-42s │\n", meta$device_id))
+      cat(sprintf("  Device ID:     %s\n", meta$device_id))
     }
 
     if(!is.na(meta$firmware_version)){
-      cat(sprintf("│ Firmware:      %-42s │\n", meta$firmware_version))
+      cat(sprintf("  Firmware:      %s\n", meta$firmware_version))
     }
 
-    cat("└─────────────────────────────────────────────────────────┘\n\n")
+    cat("\n")
   }
 
-  cat("┌─ TECHNICAL DETAILS ─────────────────────────────────────┐\n")
+  cat("TECHNICAL DETAILS ──────────────────────────────────────\n")
 
-  cat(sprintf("│ Coordinate System:  %-35s │\n",
-              toupper(meta$coordinate_system)))
+  cat(sprintf("  Coordinate System:  %s\n", toupper(meta$coordinate_system)))
 
   if(!is.na(meta$native_hz)){
-    cat(sprintf("│ Sample Rate:        %.2f Hz%-28s │\n",
-                meta$native_hz, ""))
-    cat(sprintf("│ Sample Interval:    %.3f seconds%-23s │\n",
-                meta$median_dt, ""))
+    cat(sprintf("  Sample Rate:        %.2f Hz\n", meta$native_hz))
+    cat(sprintf("  Sample Interval:    %.3f seconds\n", meta$median_dt))
   }
 
   if(!is.null(meta$filters_applied)){
     chain <- paste(meta$filters_applied, collapse = " → ")
-    cat(sprintf("│ Filters Applied:    %-35s │\n", chain))
+    cat(sprintf("  Filters Applied:    %s\n", chain))
   }
 
-  cat("└─────────────────────────────────────────────────────────┘\n\n")
+  cat("\n")
 
   # COLUMN MAPPING
-  if(!is.null(meta$column_mapping) && meta$source %in% c('guess_csv', 'manual_csv')){
-    cat("┌─ COLUMN MAPPING ────────────────────────────────────────┐\n")
+  if(!is.null(meta$column_mapping) && meta$source %in% c('guess_csv', 'manual_csv', 'template_csv')){
+    cat("COLUMN MAPPING ─────────────────────────────────────────\n")
 
     mapping <- meta$column_mapping
 
     for(col_name in names(mapping)){
       original <- mapping[[col_name]]
       if(!is.null(original) && original != "[not specified]"){
-        cat(sprintf("│ %-14s → %-38s │\n", col_name, original))
+        cat(sprintf("  %-14s → %s\n", col_name, original))
       } else if(original == "[not specified]"){
-        cat(sprintf("│ %-14s → %-38s │\n", col_name, "[not specified]"))
+        cat(sprintf("  %-14s → [not specified]\n", col_name))
       } else {
-        cat(sprintf("│ %-14s → %-38s │\n", col_name, "[not found]"))
+        cat(sprintf("  %-14s → [not found]\n", col_name))
       }
     }
 
-    cat("└─────────────────────────────────────────────────────────┘\n\n")
+    cat("\n")
   }
 
-  cat("┌─ PROCESSING INFORMATION ────────────────────────────────┐\n")
-  cat(sprintf("│ Created:       %s%-20s │\n",
-              format(meta$created_timestamp, "%Y-%m-%d %H:%M:%S"), ""))
-  cat(sprintf("│ Created By:    %-42s │\n", meta$created_by))
-  cat(sprintf("│ Package Ver:   %-42s │\n", meta$package_version))
-  cat("└─────────────────────────────────────────────────────────┘\n\n")
+  cat("PROCESSING INFORMATION ─────────────────────────────────\n")
+  cat(sprintf("  Created:       %s\n", format(meta$created_timestamp, "%Y-%m-%d %H:%M:%S")))
+  cat(sprintf("  Created By:    %s\n", meta$created_by))
+  cat(sprintf("  Package Ver:   %s\n", meta$package_version))
+  cat("\n")
 
   invisible(meta)
 }
@@ -1549,29 +1545,43 @@ print.motion_trace <- function(x, ...){
 
 #' Initiate a Motion Grammar Session
 #'
-#' @param source Character; data source ('auto', 'strava', 'catapult_replay', 'guess_csv', 'manual_csv', 'gpx')
+#' @param source Character; data source ('auto', 'strava', 'catapult_replay',
+#'   'guess_csv', 'manual_csv', 'gpx', 'template_csv')
 #' @param session Character; Strava ID/URL or file path
 #' @param coord_system Character; 'gps' or 'local'
 #' @param verbose Logical; print summary
+#' @param template A \code{csv_template} object created by
+#'   \code{\link{csv_template}()}, or a file path to an XML template saved by
+#'   \code{\link{save_csv_template}()}. When provided, \code{source} is
+#'   automatically set to \code{'template_csv'}.
 #' @param ... Additional arguments for manual_csv
 #' @export
 initiate <- function(source = 'auto',
                      session = '17134112147',
                      coord_system = 'gps',
                      verbose = TRUE,
+                     template = NULL,
                      ...){
 
-  # Auto-detect source from file extension
-  if(source == 'auto' && file.exists(session)){
+  # Resolve template: XML file path -> csv_template object
+  if (is.character(template) && length(template) == 1) {
+    template <- load_csv_template(template)
+  }
+
+  # Auto-detect source
+  if (!is.null(template)) {
+    if (source != 'auto' && source != 'template_csv')
+      warning("initiate(): template provided — ignoring source = '", source,
+              "' and using 'template_csv'")
+    source <- 'template_csv'
+  } else if (source == 'auto' && file.exists(session)) {
     ext <- tolower(tools::file_ext(session))
     source <- switch(ext,
       'csv' = 'guess_csv',
       'gpx' = 'gpx',
       stop(sprintf("Unknown file extension: .%s\nSupported: .csv, .gpx", ext))
     )
-    if(verbose){
-      message(sprintf("Auto-detected source: %s", source))
-    }
+    if (verbose) message(sprintf("Auto-detected source: %s", source))
   }
 
   trace <- switch(source,
@@ -1729,6 +1739,34 @@ initiate <- function(source = 'auto',
       trace
     },
 
+    'template_csv' = {
+      if (is.null(template))
+        stop("initiate(): source = 'template_csv' requires a template argument")
+      if (!file.exists(session))
+        stop(sprintf("File not found: %s\nCheck path and try again.", session))
+
+      coord_system <- template$coord_system  # template takes precedence
+
+      trace <- initiate_template_csv(session, template)
+
+      col_mapping <- attr(trace, 'column_mapping')
+
+      metadata <- create_metadata(
+        session     = session,
+        source      = 'template_csv',
+        trace       = trace,
+        device_info = NULL,
+        coord_system = coord_system
+      )
+
+      metadata$column_mapping <- col_mapping
+
+      attr(trace, 'metadata')       <- metadata
+      attr(trace, 'column_mapping') <- NULL
+
+      trace
+    },
+
     'gpx' = {
       if(!file.exists(session)){
         stop(sprintf("File not found: %s\nCheck path and try again.", session))
@@ -1747,7 +1785,7 @@ initiate <- function(source = 'auto',
       trace
     },
 
-    stop("Unknown source. Use 'auto', 'strava', 'catapult_replay', 'guess_csv', 'manual_csv', or 'gpx'.")
+    stop("Unknown source. Use 'auto', 'strava', 'catapult_replay', 'guess_csv', 'manual_csv', 'gpx', or 'template_csv'.")
   )
 
   trace$is_interpolated <- FALSE
@@ -1759,3 +1797,575 @@ initiate <- function(source = 'auto',
 
   return(trace)
 }
+
+
+# segment name: csv_template ---
+
+# ── XML helpers (no external dependency) ──────────────────────────────────────
+
+#' @keywords internal
+.xml_escape <- function(s) {
+  s <- gsub("&", "&amp;", s, fixed = TRUE)
+  s <- gsub("<", "&lt;",  s, fixed = TRUE)
+  s <- gsub(">", "&gt;",  s, fixed = TRUE)
+  s <- gsub('"', "&quot;", s, fixed = TRUE)
+  s
+}
+
+#' @keywords internal
+.xml_unescape <- function(s) {
+  s <- gsub("&quot;", '"', s, fixed = TRUE)
+  s <- gsub("&gt;",   ">", s, fixed = TRUE)
+  s <- gsub("&lt;",   "<", s, fixed = TRUE)
+  s <- gsub("&amp;",  "&", s, fixed = TRUE)
+  s
+}
+
+# Parse a column reference from the XML-serialised string back to its original
+# type: integer if the string is all digits, otherwise character.
+#' @keywords internal
+.parse_col_ref <- function(val) {
+  if (is.null(val) || nchar(trimws(val)) == 0) return(NULL)
+  n <- suppressWarnings(as.integer(trimws(val)))
+  if (!is.na(n) && identical(trimws(val), as.character(n))) n else val
+}
+
+# ── csv_template constructor ───────────────────────────────────────────────────
+
+#' Create a CSV Format Template
+#'
+#' Defines a reusable column-mapping and parsing specification for importing
+#' CSV files with a known but non-standard layout. Pass the resulting object
+#' to \code{\link{initiate}()} via the \code{template} argument, or serialise
+#' it with \code{\link{save_csv_template}()}.
+#'
+#' Column references (\code{col_unix}, \code{col_lat}, etc.) accept either a
+#' \strong{column name} (character, case-insensitive) or a \strong{1-based
+#' integer column index}. Using an index is useful when the file has duplicate
+#' column names or no header row.
+#'
+#' \code{col_extra} accepts a named or unnamed character or integer vector:
+#' \itemize{
+#'   \item \code{c("HeartRate")} — import by name; output column keeps the CSV name.
+#'   \item \code{c(hr = "HeartRate")} — import by name; output column renamed to \code{hr}.
+#'   \item \code{c(5L)} — import column 5 by index; output column named \code{col_5}.
+#'   \item \code{c(heart_rate = 5L)} — import column 5; output column named \code{heart_rate}.
+#' }
+#'
+#' @param coord_system Character; \code{"gps"} (lat/lng) or \code{"local"}
+#'   (x/y). Defaults to \code{"gps"}.
+#' @param col_unix Column name or 1-based integer index of the timestamp
+#'   column. Required.
+#' @param col_lat Column name or index of the latitude column
+#'   (\code{coord_system = "gps"}). Required for GPS.
+#' @param col_lng Column name or index of the longitude column
+#'   (\code{coord_system = "gps"}). Required for GPS.
+#' @param col_altitude Column name or index of the altitude column (GPS mode).
+#'   Optional.
+#' @param col_x Column name or index of the x-coordinate column
+#'   (\code{coord_system = "local"}). Required for local.
+#' @param col_y Column name or index of the y-coordinate column
+#'   (\code{coord_system = "local"}). Required for local.
+#' @param col_z Column name or index of the z-coordinate column (local mode).
+#'   Optional.
+#' @param col_velocity Column name or index of a pre-computed velocity column.
+#'   When supplied it is imported as \code{velocity}, allowing you to skip
+#'   \code{derivate()} for that metric.
+#' @param col_acceleration Column name or index of a pre-computed acceleration
+#'   column. Imported as \code{acceleration} when supplied.
+#' @param col_extra Named or unnamed character or integer vector of additional
+#'   columns to carry through as custom elaboration columns. See Details.
+#' @param skip Integer; rows to skip \emph{before} the header row. Use this
+#'   for files with device metadata or preamble above the data table. Defaults
+#'   to \code{0}.
+#' @param max_empty_lines Integer; consecutive blank rows that signal the end
+#'   of the data block. Defaults to \code{3}.
+#' @param comment Character; line-prefix marking comment rows to be ignored.
+#'   Defaults to \code{"#"}.
+#' @param duplicate_method Character; behaviour when a column \emph{name}
+#'   matches more than one column in the file.
+#'   \itemize{
+#'     \item \code{"return_error"} (default) — stop with an informative message
+#'       listing the duplicate positions; use an integer index instead.
+#'     \item \code{"use_first"} — silently take the first matching column.
+#'     \item \code{"use_second"} — take the second matching column (useful for
+#'       files like Catapult where the second \code{Time} column is the GPS
+#'       timestamp).
+#'   }
+#'
+#' @return An object of class \code{csv_template}.
+#' @seealso \code{\link{save_csv_template}}, \code{\link{load_csv_template}},
+#'   \code{\link{initiate}}
+#' @export
+csv_template <- function(
+    coord_system     = c("gps", "local"),
+    col_unix,
+    col_lat          = NULL,
+    col_lng          = NULL,
+    col_altitude     = NULL,
+    col_x            = NULL,
+    col_y            = NULL,
+    col_z            = NULL,
+    col_velocity     = NULL,
+    col_acceleration = NULL,
+    col_extra        = NULL,
+    skip             = 0L,
+    max_empty_lines  = 3L,
+    comment          = "#",
+    duplicate_method = c("return_error", "use_first", "use_second")
+) {
+  coord_system     <- match.arg(coord_system)
+  duplicate_method <- match.arg(duplicate_method)
+
+  if (missing(col_unix) || is.null(col_unix))
+    stop("csv_template(): col_unix is required")
+
+  if (coord_system == "gps") {
+    if (is.null(col_lat))
+      stop("csv_template(): col_lat is required when coord_system = 'gps'")
+    if (is.null(col_lng))
+      stop("csv_template(): col_lng is required when coord_system = 'gps'")
+    col_coord1 <- col_lat
+    col_coord2 <- col_lng
+    col_coord3 <- col_altitude
+  } else {
+    if (is.null(col_x))
+      stop("csv_template(): col_x is required when coord_system = 'local'")
+    if (is.null(col_y))
+      stop("csv_template(): col_y is required when coord_system = 'local'")
+    col_coord1 <- col_x
+    col_coord2 <- col_y
+    col_coord3 <- col_z
+  }
+
+  structure(
+    list(
+      coord_system     = coord_system,
+      skip             = as.integer(skip),
+      max_empty_lines  = as.integer(max_empty_lines),
+      comment          = as.character(comment),
+      duplicate_method = duplicate_method,
+      col_unix         = col_unix,
+      col_coord1       = col_coord1,
+      col_coord2       = col_coord2,
+      col_coord3       = col_coord3,
+      col_velocity     = col_velocity,
+      col_acceleration = col_acceleration,
+      col_extra        = col_extra
+    ),
+    class = "csv_template"
+  )
+}
+
+#' @method print csv_template
+#' @export
+print.csv_template <- function(x, ...) {
+  coord_names <- if (x$coord_system == "gps")
+    c("lat", "lng", "altitude")
+  else
+    c("x", "y", "z")
+
+  fmt_ref <- function(ref) {
+    if (is.null(ref)) return(NULL)
+    if (is.numeric(ref) || is.integer(ref)) sprintf("[col %d]", as.integer(ref))
+    else as.character(ref)
+  }
+
+  cat(sprintf("CSV Template [%s]\n", x$coord_system))
+  cat(sprintf(
+    "  skip: %d  |  max_empty_lines: %d  |  comment: '%s'  |  duplicate_method: %s\n",
+    x$skip, x$max_empty_lines, x$comment, x$duplicate_method
+  ))
+  cat("  Column mapping:\n")
+  cat(sprintf("    unix_time    <- %s\n", fmt_ref(x$col_unix)))
+  cat(sprintf("    %-12s <- %s\n", coord_names[1], fmt_ref(x$col_coord1)))
+  cat(sprintf("    %-12s <- %s\n", coord_names[2], fmt_ref(x$col_coord2)))
+  if (!is.null(x$col_coord3))
+    cat(sprintf("    %-12s <- %s\n", coord_names[3], fmt_ref(x$col_coord3)))
+  if (!is.null(x$col_velocity))
+    cat(sprintf("    velocity     <- %s\n", fmt_ref(x$col_velocity)))
+  if (!is.null(x$col_acceleration))
+    cat(sprintf("    acceleration <- %s\n", fmt_ref(x$col_acceleration)))
+  if (!is.null(x$col_extra) && length(x$col_extra) > 0) {
+    nms <- names(x$col_extra)
+    parts <- vapply(seq_along(x$col_extra), function(i) {
+      ref <- x$col_extra[[i]]
+      nm  <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else NULL
+      if (is.null(nm)) fmt_ref(ref)
+      else sprintf("%s <- %s", nm, fmt_ref(ref))
+    }, character(1))
+    cat(sprintf("  Extra columns: %s\n", paste(parts, collapse = ", ")))
+  }
+  invisible(x)
+}
+
+# ── XML serialisation ──────────────────────────────────────────────────────────
+
+#' Save a CSV Template to an XML File
+#'
+#' Serialises a \code{csv_template} object to a portable XML file that can be
+#' shared across scripts, checked into version control, or loaded later with
+#' \code{\link{load_csv_template}()}.
+#'
+#' @param template A \code{csv_template} object.
+#' @param path Character; file path for the output \code{.xml} file.
+#'
+#' @return Invisibly returns \code{template}.
+#' @seealso \code{\link{csv_template}}, \code{\link{load_csv_template}}
+#' @export
+save_csv_template <- function(template, path) {
+  if (!inherits(template, "csv_template"))
+    stop("save_csv_template(): template must be a csv_template object")
+
+  add_tag <- function(name, value, indent = "  ") {
+    if (is.null(value) || (length(value) == 1 && is.na(value)))
+      return(character(0))
+    sprintf("%s<%s>%s</%s>", indent, name, .xml_escape(as.character(value)), name)
+  }
+
+  lines <- c(
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    "<csv_template>",
+    add_tag("coord_system",    template$coord_system),
+    add_tag("skip",            template$skip),
+    add_tag("max_empty_lines", template$max_empty_lines),
+    add_tag("comment",         template$comment),
+    add_tag("duplicate_method", template$duplicate_method),
+    "  <columns>",
+    add_tag("col_unix",         template$col_unix,         "    "),
+    add_tag("col_coord1",       template$col_coord1,       "    "),
+    add_tag("col_coord2",       template$col_coord2,       "    "),
+    add_tag("col_coord3",       template$col_coord3,       "    "),
+    add_tag("col_velocity",     template$col_velocity,     "    "),
+    add_tag("col_acceleration", template$col_acceleration, "    "),
+    "  </columns>"
+  )
+
+  if (!is.null(template$col_extra) && length(template$col_extra) > 0) {
+    nms <- names(template$col_extra)
+    extra_tags <- vapply(seq_along(template$col_extra), function(i) {
+      ref    <- template$col_extra[[i]]
+      nm     <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else NULL
+      as_attr <- if (!is.null(nm))
+        sprintf(' as="%s"', .xml_escape(nm))
+      else
+        ""
+      sprintf('    <col ref="%s"%s/>', .xml_escape(as.character(ref)), as_attr)
+    }, character(1))
+    lines <- c(lines, "  <extra_columns>", extra_tags, "  </extra_columns>")
+  }
+
+  lines <- c(lines, "</csv_template>")
+  writeLines(lines, path)
+  invisible(template)
+}
+
+#' Load a CSV Template from an XML File
+#'
+#' Reads an XML file written by \code{\link{save_csv_template}()} and returns
+#' a \code{csv_template} object. The returned object can be passed directly to
+#' \code{\link{initiate}()} via its \code{template} argument.
+#'
+#' @param path Character; path to the XML file.
+#'
+#' @return A \code{csv_template} object.
+#' @seealso \code{\link{csv_template}}, \code{\link{save_csv_template}}
+#' @export
+load_csv_template <- function(path) {
+  if (!file.exists(path))
+    stop("load_csv_template(): file not found: ", path)
+
+  content <- paste(readLines(path, warn = FALSE), collapse = "\n")
+
+  get_tag <- function(tag, text) {
+    pattern <- sprintf("<%s>([^<]*)</%s>", tag, tag)
+    m <- regmatches(text, regexpr(pattern, text, perl = TRUE))
+    if (length(m) == 0 || identical(m, character(0))) return(NULL)
+    val <- sub(sprintf("^<%s>", tag), "", sub(sprintf("</%s>$", tag), "", m))
+    val <- .xml_unescape(val)
+    if (nchar(val) == 0) NULL else val
+  }
+
+  # Extract <columns> sub-section ((?s) = DOTALL, . matches newlines)
+  cols_m       <- regexpr("(?s)<columns>(.*?)</columns>", content, perl = TRUE)
+  cols_section <- if (cols_m > 0) regmatches(content, cols_m) else content
+
+  # Extract <extra_columns>
+  col_extra <- NULL
+  extra_m   <- regexpr("(?s)<extra_columns>(.*?)</extra_columns>", content, perl = TRUE)
+  if (extra_m > 0) {
+    extra_section <- regmatches(content, extra_m)
+
+    # New format: <col ref="..." as="..."/>
+    ref_matches <- gregexpr('<col ref="[^"]*"[^/]*/>', extra_section, perl = TRUE)
+    ref_vals    <- regmatches(extra_section, ref_matches)[[1]]
+
+    if (length(ref_vals) > 0) {
+      # Extract ref attribute value via backreference
+      refs <- .xml_unescape(gsub('^.*<col ref="([^"]*)".*$', "\\1", ref_vals))
+
+      as_vals <- vapply(ref_vals, function(tag) {
+        if (!grepl('as="', tag, fixed = TRUE)) return(NA_character_)
+        .xml_unescape(gsub('^.*as="([^"]*)".*$', "\\1", tag))
+      }, character(1))
+
+      parsed_refs <- lapply(refs, .parse_col_ref)
+
+      # Rebuild col_extra: named if any 'as' is present, else plain
+      has_names <- any(!is.na(as_vals))
+      out_names <- ifelse(is.na(as_vals), "", as_vals)
+
+      # Detect if all refs are integer
+      all_int <- all(vapply(parsed_refs, is.integer, logical(1)))
+      col_extra_vec <- if (all_int)
+        vapply(parsed_refs, as.integer, integer(1))
+      else
+        vapply(parsed_refs, function(x) as.character(x), character(1))
+
+      if (has_names) names(col_extra_vec) <- out_names
+      col_extra <- col_extra_vec
+
+    } else {
+      # Legacy format: <col>value</col>
+      old_matches <- gregexpr("<col>([^<]*)</col>", extra_section, perl = TRUE)
+      old_vals    <- regmatches(extra_section, old_matches)[[1]]
+      if (length(old_vals) > 0) {
+        col_extra <- .xml_unescape(sub("^<col>", "", sub("</col>$", "", old_vals)))
+      }
+    }
+  }
+
+  coord_system    <- get_tag("coord_system",    content) %||% "gps"
+  skip            <- as.integer(get_tag("skip",            content) %||% "0")
+  max_empty_lines <- as.integer(get_tag("max_empty_lines", content) %||% "3")
+  comment         <- get_tag("comment",         content) %||% "#"
+  duplicate_method <- get_tag("duplicate_method", content) %||% "return_error"
+
+  # col_* values may be integer indices or column names
+  col_unix         <- .parse_col_ref(get_tag("col_unix",         cols_section))
+  col_coord1       <- .parse_col_ref(get_tag("col_coord1",       cols_section))
+  col_coord2       <- .parse_col_ref(get_tag("col_coord2",       cols_section))
+  col_coord3       <- .parse_col_ref(get_tag("col_coord3",       cols_section))
+  col_velocity     <- .parse_col_ref(get_tag("col_velocity",     cols_section))
+  col_acceleration <- .parse_col_ref(get_tag("col_acceleration", cols_section))
+
+  if (is.null(col_unix))
+    stop("load_csv_template(): <col_unix> not found in XML")
+  if (is.null(col_coord1))
+    stop("load_csv_template(): <col_coord1> (lat / x) not found in XML")
+  if (is.null(col_coord2))
+    stop("load_csv_template(): <col_coord2> (lng / y) not found in XML")
+
+  structure(
+    list(
+      coord_system     = coord_system,
+      skip             = skip,
+      max_empty_lines  = max_empty_lines,
+      comment          = comment,
+      duplicate_method = duplicate_method,
+      col_unix         = col_unix,
+      col_coord1       = col_coord1,
+      col_coord2       = col_coord2,
+      col_coord3       = col_coord3,
+      col_velocity     = col_velocity,
+      col_acceleration = col_acceleration,
+      col_extra        = col_extra
+    ),
+    class = "csv_template"
+  )
+}
+
+# ── Internal CSV reader ────────────────────────────────────────────────────────
+
+# Resolve a column reference (string name or 1-based integer) to a column index.
+# Returns an integer index into all_cols.
+#' @keywords internal
+.find_col_ref <- function(ref, all_cols, col_lower, duplicate_method) {
+  if (is.null(ref)) return(NULL)
+  n <- length(all_cols)
+
+  if (is.numeric(ref) || is.integer(ref)) {
+    idx <- as.integer(ref)
+    if (idx < 1L || idx > n)
+      stop(sprintf(
+        "csv_template: column index %d is out of range (file has %d columns)",
+        idx, n
+      ))
+    return(idx)
+  }
+
+  # String: case-insensitive match
+  matches <- which(col_lower == stringr::str_to_lower(as.character(ref)))
+
+  if (length(matches) == 0)
+    stop(sprintf(
+      "csv_template: column '%s' not found. Available: %s",
+      ref, paste(all_cols, collapse = ", ")
+    ))
+
+  if (length(matches) > 1) {
+    dup_info <- paste(matches, collapse = ", ")
+    if (duplicate_method == "return_error")
+      stop(sprintf(
+        "csv_template: column name '%s' appears %d times (positions: %s). Use an integer index to select a specific column, or set duplicate_method = 'use_first' / 'use_second'.",
+        ref, length(matches), dup_info
+      ))
+    else if (duplicate_method == "use_second") {
+      if (length(matches) < 2)
+        stop(sprintf(
+          "csv_template: duplicate_method = 'use_second' but '%s' only appears once",
+          ref
+        ))
+      return(matches[2])
+    }
+    # use_first falls through to matches[1]
+  }
+
+  matches[1]
+}
+
+#' Read a CSV file using a csv_template specification
+#' @keywords internal
+initiate_template_csv <- function(.data_path, template) {
+
+  all_lines <- readr::read_lines(.data_path)
+
+  # Skip preamble rows
+  if (template$skip > 0)
+    all_lines <- all_lines[(template$skip + 1L):length(all_lines)]
+
+  # Strip comment lines
+  if (nchar(template$comment) > 0)
+    all_lines <- all_lines[!stringr::str_starts(
+      stringr::str_trim(all_lines, side = "left"),
+      stringr::fixed(template$comment)
+    )]
+
+  # Detect data end: stop at max_empty_lines consecutive blank rows
+  empty_flags       <- stringr::str_detect(all_lines, "^\\s*$")
+  consecutive_empty <- 0L
+  stop_at           <- length(all_lines)
+
+  for (i in seq_along(all_lines)) {
+    if (empty_flags[i]) {
+      consecutive_empty <- consecutive_empty + 1L
+      if (consecutive_empty >= template$max_empty_lines) {
+        stop_at <- i - template$max_empty_lines
+        break
+      }
+    } else {
+      consecutive_empty <- 0L
+    }
+  }
+
+  data_lines <- all_lines[1:stop_at]
+  data_lines <- data_lines[!empty_flags[1:stop_at]]
+
+  if (length(data_lines) < 2)
+    stop("csv_template: no data rows found after skip and blank-row trimming")
+
+  df <- suppressWarnings(
+    readr::read_csv(
+      I(paste(data_lines, collapse = "\n")),
+      show_col_types = FALSE,
+      col_types = readr::cols(.default = readr::col_character()),
+      name_repair = "minimal"   # preserve duplicate column names for duplicate_method
+    )
+  )
+
+  if (nrow(df) == 0)
+    stop("csv_template: no data rows found after parsing")
+
+  all_cols  <- colnames(df)
+  col_lower <- stringr::str_to_lower(all_cols)
+  dm        <- template$duplicate_method
+
+  find <- function(ref) .find_col_ref(ref, all_cols, col_lower, dm)
+
+  unix_idx   <- find(template$col_unix)
+  coord1_idx <- find(template$col_coord1)
+  coord2_idx <- find(template$col_coord2)
+  coord3_idx <- find(template$col_coord3)   # NULL if not specified
+  vel_idx    <- find(template$col_velocity)
+  acc_idx    <- find(template$col_acceleration)
+
+  # Resolve col_extra: named/unnamed character or integer vector
+  extra_resolved <- list()  # list of list(idx, out_name)
+  if (!is.null(template$col_extra)) {
+    nms <- names(template$col_extra)
+    for (i in seq_along(template$col_extra)) {
+      ref    <- template$col_extra[[i]]
+      usr_nm <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else NULL
+
+      idx <- tryCatch(find(ref), error = function(e) {
+        warning(sprintf("csv_template: %s — skipping.", conditionMessage(e)))
+        NULL
+      })
+      if (is.null(idx)) next
+
+      # Determine output column name
+      out_nm <- if (!is.null(usr_nm)) {
+        usr_nm
+      } else if (is.numeric(ref) || is.integer(ref)) {
+        sprintf("col_%d", as.integer(ref))
+      } else {
+        all_cols[idx]  # preserve actual CSV case
+      }
+
+      extra_resolved <- c(extra_resolved, list(list(idx = idx, name = out_nm)))
+    }
+  }
+
+  # Standard output column names
+  std_names <- if (template$coord_system == "gps")
+    c("unix_time", "lat", "lng", "altitude")
+  else
+    c("unix_time", "x", "y", "z")
+
+  # Build output tibble with standard columns (access by integer index)
+  output <- tibble::tibble(
+    unix_time = convert_to_unix(df[[unix_idx]]),
+    coord1    = suppressWarnings(as.numeric(df[[coord1_idx]])),
+    coord2    = suppressWarnings(as.numeric(df[[coord2_idx]])),
+    coord3    = if (!is.null(coord3_idx))
+      suppressWarnings(as.numeric(df[[coord3_idx]]))
+    else NA_real_
+  )
+  colnames(output) <- std_names
+
+  # Pre-computed velocity / acceleration
+  if (!is.null(vel_idx))
+    output[["velocity"]] <- suppressWarnings(as.numeric(df[[vel_idx]]))
+
+  if (!is.null(acc_idx))
+    output[["acceleration"]] <- suppressWarnings(as.numeric(df[[acc_idx]]))
+
+  # Extra columns: try numeric, fall back to character if mostly NA
+  for (er in extra_resolved) {
+    raw         <- df[[er$idx]]
+    num_attempt <- suppressWarnings(as.numeric(raw))
+    output[[er$name]] <- if (mean(is.na(num_attempt)) <= 0.5) num_attempt else raw
+  }
+
+  # NA diagnostics
+  n_na_unix <- sum(is.na(output[["unix_time"]]))
+  if (n_na_unix > 0)
+    warning(sprintf("csv_template: %d unix_time value(s) are NA", n_na_unix))
+
+  # Column mapping for metadata (records original references)
+  mapping <- list()
+  mapping[["unix_time"]]  <- template$col_unix
+  mapping[[std_names[2]]] <- template$col_coord1
+  mapping[[std_names[3]]] <- template$col_coord2
+  mapping[[std_names[4]]] <- template$col_coord3 %||% "[not specified]"
+  if (!is.null(template$col_velocity))
+    mapping[["velocity"]]     <- template$col_velocity
+  if (!is.null(template$col_acceleration))
+    mapping[["acceleration"]] <- template$col_acceleration
+  if (length(extra_resolved) > 0)
+    mapping[["extra_columns"]] <- vapply(extra_resolved, `[[`, character(1), "name")
+
+  attr(output, "column_mapping") <- mapping
+  output
+}
+

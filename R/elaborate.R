@@ -62,6 +62,7 @@ elaborate <- function(.data, ..., by = NULL) {
     'unix_time', 'x', 'y', 'z', 'f_x', 'f_y',
     'lat', 'lng', 'altitude', 'is_interpolated',
     'distance', 'velocity', 'acceleration', 'heading', 'angular_velocity',
+    'jerk', 'lateral_g',
     'designation'
   )
   overwritten <- intersect(modified, reserved)

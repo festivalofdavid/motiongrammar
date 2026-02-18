@@ -9,7 +9,8 @@ derivate(
   use_filtered = TRUE,
   window = NULL,
   speed_floor = 0.5,
-  signed_omega = FALSE
+  signed_omega = FALSE,
+  derivatives = NULL
 )
 }
 \arguments{
@@ -20,16 +21,25 @@ derivate(
 \item{window}{Window size in rows. Defaults to the sample rate in Hz
 (i.e. 1-second periods). Pass a single integer to use the same window
 for all derivatives, or a named list to set per-derivative windows:
-\code{list(velocity = 5, acceleration = 10, angular_velocity = 8)}.
+\code{list(velocity = 5, acceleration = 10, angular_velocity = 8, jerk = 10)}.
 Any derivative not named in the list falls back to the default.}
 
 \item{speed_floor}{Numeric: speeds below this (m/s) are treated as stationary for heading/omega.}
 
 \item{signed_omega}{Logical: if TRUE, angular velocity retains sign (positive = left/CCW,
 negative = right/CW). Defaults to FALSE (absolute magnitude).}
+
+\item{derivatives}{Character vector of derivative columns to include in the output,
+or \code{"all"} to include all available derivatives. Defaults to \code{NULL},
+which returns the standard set: \code{velocity}, \code{acceleration},
+\code{angular_velocity}. Valid values: \code{"velocity"},
+\code{"acceleration"}, \code{"angular_velocity"}, \code{"jerk"},
+\code{"lateral_g"}. \code{distance} and \code{heading} are always included.}
 }
 \value{
-A motion_trace with distance, velocity, acceleration, heading, angular_velocity.
+A motion_trace with distance and heading always present, plus the
+requested derivative columns (velocity, acceleration, angular_velocity,
+jerk, and/or lateral_g).
 }
 \description{
 Calculate Derivatives of Motion

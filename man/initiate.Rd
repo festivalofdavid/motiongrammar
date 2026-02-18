@@ -9,17 +9,24 @@ initiate(
   session = "17134112147",
   coord_system = "gps",
   verbose = TRUE,
+  template = NULL,
   ...
 )
 }
 \arguments{
-\item{source}{Character; data source ('auto', 'strava', 'catapult_replay', 'guess_csv', 'manual_csv', 'gpx')}
+\item{source}{Character; data source ('auto', 'strava', 'catapult_replay',
+'guess_csv', 'manual_csv', 'gpx', 'template_csv')}
 
 \item{session}{Character; Strava ID/URL or file path}
 
 \item{coord_system}{Character; 'gps' or 'local'}
 
 \item{verbose}{Logical; print summary}
+
+\item{template}{A \code{csv_template} object created by
+\code{\link{csv_template}()}, or a file path to an XML template saved by
+\code{\link{save_csv_template}()}. When provided, \code{source} is
+automatically set to \code{'template_csv'}.}
 
 \item{...}{Additional arguments for manual_csv}
 }
