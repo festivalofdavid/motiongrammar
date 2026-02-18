@@ -178,6 +178,7 @@ interpolate <- function(.data,
                         hz = 1,
                         max_gap_frames = 5){
 
+  validate_motion_trace(.data, 'interpolate')
   n_input_rows <- nrow(.data)
 
   # Calculate expected interval in seconds

@@ -503,6 +503,63 @@ initiate_gpx <- function(.data_path){
   if(is.null(a)) b else a
 }
 
+#' Validate a motion_trace Object
+#'
+#' Called at the entry of every major pipeline function. Checks that the input
+#' is a \code{motion_trace}, has \code{unix_time}, and optionally that specific
+#' columns are present.
+#'
+#' @param .data Object to validate.
+#' @param call Character; calling function name, used in error messages.
+#' @param requires Character vector of additional required column names.
+#' @keywords internal
+validate_motion_trace <- function(.data, call = 'function', requires = character(0)) {
+
+  if (!inherits(.data, 'motion_trace')) {
+    stop(
+      call, '(): input must be a motion_trace object created by initiate(). ',
+      'If a dplyr verb stripped the class, wrap the operation in elaborate() ',
+      'or ensure dplyr >= 1.0 is installed so dplyr_reconstruct() is active.'
+    )
+  }
+
+  required <- c('unix_time', requires)
+  missing  <- setdiff(required, names(.data))
+  if (length(missing) > 0) {
+    stop(
+      call, '(): required column(s) missing: ',
+      paste(missing, collapse = ', '),
+      '. Ensure all prior pipeline steps have been completed.'
+    )
+  }
+
+  if (is.null(attr(.data, 'metadata'))) {
+    warning(
+      call, '(): metadata attribute is missing. ',
+      'Quality and reproducibility tracking will be incomplete.'
+    )
+  }
+
+  invisible(.data)
+}
+
+#' dplyr reconstruct method for motion_trace
+#'
+#' Ensures that dplyr verbs (filter, slice, arrange, rename, etc.) preserve
+#' the motion_trace class and its metadata and quality attributes. Registered
+#' automatically when the package is loaded.
+#'
+#' @param data The result of a dplyr operation.
+#' @param template The original motion_trace object.
+#' @keywords internal
+#' @export
+dplyr_reconstruct.motion_trace <- function(data, template) {
+  attr(data, 'metadata') <- attr(template, 'metadata')
+  attr(data, 'quality')  <- attr(template, 'quality')
+  class(data) <- class(template)
+  data
+}
+
 #' Create Metadata
 #' @keywords internal
 create_metadata <- function(session,
@@ -704,7 +761,13 @@ init_quality_log <- function(trace, source){
     largest_gap <- 0
   }
 
-  valid_coords <- sum(!is.na(trace$lat) & !is.na(trace$lng))
+  if ('lat' %in% names(trace) && 'lng' %in% names(trace)) {
+    valid_coords <- sum(!is.na(trace$lat) & !is.na(trace$lng))
+  } else if ('x' %in% names(trace) && 'y' %in% names(trace)) {
+    valid_coords <- sum(!is.na(trace$x) & !is.na(trace$y))
+  } else {
+    valid_coords <- nrow(trace)
+  }
   completeness <- valid_coords / nrow(trace)
 
   time_range <- range(trace$unix_time, na.rm = TRUE)
@@ -749,7 +812,8 @@ init_quality_log <- function(trace, source){
     }
   }
 
-  if(source %in% c('strava', 'guess_csv', 'catapult_replay', 'manual_csv', 'gpx')){
+  if(source %in% c('strava', 'guess_csv', 'catapult_replay', 'manual_csv', 'gpx') &&
+     'lat' %in% names(trace) && 'lng' %in% names(trace)){
     lat_range <- diff(range(trace$lat, na.rm = TRUE))
     lng_range <- diff(range(trace$lng, na.rm = TRUE))
 
@@ -797,14 +861,28 @@ init_quality_log <- function(trace, source){
       largest_gap_sec = largest_gap,
       gap_percentage = gap_percentage,
 
-      lat_range = if(source != 'local') diff(range(trace$lat, na.rm = TRUE)) else NA,
-      lng_range = if(source != 'local') diff(range(trace$lng, na.rm = TRUE)) else NA,
+      lat_range = if('lat' %in% names(trace)) diff(range(trace$lat, na.rm = TRUE)) else NA,
+      lng_range = if('lng' %in% names(trace)) diff(range(trace$lng, na.rm = TRUE)) else NA,
 
       n_duplicates = n_duplicates,
 
       qc_pass = qc_pass,
       issues = if(length(issues) > 0) unlist(issues) else character(0),
-      warnings = if(length(warnings) > 0) unlist(warnings) else character(0)
+      warnings = if(length(warnings) > 0) unlist(warnings) else character(0),
+
+      qc_thresholds = list(
+        completeness_issue      = 0.90,
+        completeness_warning    = 0.95,
+        hz_issue                = 1,
+        hz_warning              = 5,
+        gap_multiplier          = 3,
+        gap_pct_issue           = 5,
+        gap_pct_warning         = 2,
+        largest_gap_issue_sec   = 10,
+        largest_gap_warning_sec = 5,
+        duplicate_pct_issue     = 0.01,
+        coord_range_threshold   = 0.0001
+      )
     )
   )
 
@@ -1235,6 +1313,36 @@ quality_report <- function(.data){
         cat("\n")
       }
     }
+
+    else if(step_name == "elaborate"){
+      calls <- s$calls
+      cat(sprintf("  Calls: %d\n\n", length(calls)))
+
+      for(i in seq_along(calls)){
+        c <- calls[[i]]
+        cat(sprintf("  Call %d  —  %s\n", i, format(c$timestamp, "%Y-%m-%d %H:%M:%S")))
+
+        if(!is.null(c$by)){
+          cat(sprintf("    Grouped by:  %s\n", paste(c$by, collapse = ', ')))
+        } else {
+          cat("    Grouped by:  (none)\n")
+        }
+
+        if(length(c$added) > 0){
+          cat(sprintf("    Added:       %s\n", paste(c$added, collapse = ', ')))
+        } else {
+          cat("    Added:       (none)\n")
+        }
+
+        if(length(c$modified) > 0){
+          cat(sprintf("    Modified:    %s\n", paste(c$modified, collapse = ', ')))
+        } else {
+          cat("    Modified:    (none)\n")
+        }
+
+        cat("\n")
+      }
+    }
   }
 
   cat("═══════════════════════════════════════════════════════════\n")
@@ -1401,6 +1509,12 @@ full_report <- function(.data){
 print.motion_trace <- function(x, ...){
   meta <- attr(x, 'metadata')
   qual <- attr(x, 'quality')
+
+  if (is.null(meta)) {
+    cat(sprintf("Motion Trace [no metadata] — %s rows, %s cols\n",
+                format(nrow(x), big.mark = ","), ncol(x)))
+    return(invisible(x))
+  }
 
   cat(sprintf("Motion Trace (%s)\n", meta$source))
   cat(sprintf("├─ Session: %s\n", meta$name))
@@ -1635,6 +1749,8 @@ initiate <- function(source = 'auto',
 
     stop("Unknown source. Use 'auto', 'strava', 'catapult_replay', 'guess_csv', 'manual_csv', or 'gpx'.")
   )
+
+  trace$is_interpolated <- FALSE
 
   attr(trace, 'quality') <- init_quality_log(trace, source)
 

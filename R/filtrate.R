@@ -204,6 +204,8 @@ filtrate <- function(.data,
                      alpha = 0.3,
                      poly_order = 2){
 
+  validate_motion_trace(.data, 'filtrate')
+
   # Resolve which columns to filter
   target_cols <- .resolve_target_cols(target, .data)
 

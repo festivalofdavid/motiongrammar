@@ -8,8 +8,7 @@ allocate(
   .data,
   allocation = list(velocity = c(0, 2, 4, 6, 8), acceleration = c(0, 1, 2, 3, 4),
     angular_velocity = c(0, 100, 200, 300, 400)),
-  allocation_name = "allocation_1",
-  .source = list(type = "manual", file = NULL)
+  allocation_name = "allocation_1"
 )
 }
 \arguments{

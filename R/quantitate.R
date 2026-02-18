@@ -40,6 +40,7 @@ quantitate <- function(
   ...
 ) {
 
+  validate_motion_trace(.data, 'quantitate')
   scope <- match.arg(scope, c('designation', 'session', 'active_session'))
 
   suffix_map <- c(
@@ -73,6 +74,8 @@ quantitate <- function(
     band_cols <- character(0)
   }
 
+  existing_groups <- dplyr::group_vars(.data)
+
   # Row filtering
   if (scope == 'session' || (scope == 'designation' && active_only)) {
     .data <- dplyr::filter(.data, grepl('^active_', designation))
@@ -80,11 +83,32 @@ quantitate <- function(
 
   # Grouping: designation scope always includes designation column;
   # session scopes group by bands only (empty = single-row result when NULL).
-  group_vars <- if (scope == 'designation') c('designation', band_cols) else band_cols
+  # Pre-existing groups (e.g. from group_by()) are prepended.
+  core_vars  <- if (scope == 'designation') c('designation', band_cols) else band_cols
+  group_vars <- union(existing_groups, core_vars)
 
-  .data |>
+  n_rows_in <- nrow(.data)
+
+  result <- .data |>
     dplyr::group_by(dplyr::across(dplyr::all_of(group_vars))) |>
     dplyr::summarise(..., .groups = 'drop')
+
+  attr(result, 'quantitate_log') <- list(
+    timestamp       = Sys.time(),
+    allocation      = allocation,
+    derivative      = if (!is.null(allocation)) derivative else NULL,
+    scope           = scope,
+    active_only     = active_only,
+    group_vars      = group_vars,
+    band_cols       = if (!is.null(allocation)) band_cols else NULL,
+    n_rows_in       = n_rows_in,
+    n_rows_out      = nrow(result),
+    dependencies    = list(
+      dplyr = tryCatch(as.character(utils::packageVersion('dplyr')), error = function(e) 'unknown')
+    )
+  )
+
+  result
 }
 
 #' Time in Bands

@@ -25,6 +25,8 @@ designate <- function(.data,
   cols = NULL
 ) {
 
+  validate_motion_trace(.data, 'designate')
+
   # Default min_pts from Hz (5 seconds)
   if (is.null(min_pts)) {
     meta <- attr(.data, 'metadata')

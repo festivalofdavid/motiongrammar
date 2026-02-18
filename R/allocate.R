@@ -23,9 +23,10 @@ allocate <- function(
     acceleration     = c(0, 1, 2, 3, 4),
     angular_velocity = c(0, 100, 200, 300, 400)
   ),
-  allocation_name = 'allocation_1',
-  .source = list(type = 'manual', file = NULL)
+  allocation_name = 'allocation_1'
 ) {
+
+  validate_motion_trace(.data, 'allocate')
 
   col_suffix <- list(
     velocity         = 'velocity_band',
@@ -78,9 +79,16 @@ allocate <- function(
   qual$allocate$allocations[[allocation_name]] <- list(
     allocation_name = allocation_name,
     timestamp       = Sys.time(),
-    source          = .source$type,
-    source_file     = .source$file,
-    bands           = band_detail
+    source          = 'manual',
+    source_file     = NULL,
+    bands           = band_detail,
+    algorithm = list(
+      fn            = 'findInterval',
+      package       = 'base',
+      output_type   = 'ordered factor',
+      out_of_range  = 'NA (values outside band range are not assigned)',
+      abs_applied   = 'acceleration, angular_velocity (absolute value taken before banding)'
+    )
   )
 
   attr(.data, 'quality') <- qual
@@ -145,9 +153,14 @@ allocate_csv <- function(.data, file) {
     .data <- allocate(
       .data,
       allocation      = allocation,
-      allocation_name = pname,
-      .source         = list(type = 'csv', file = file)
+      allocation_name = pname
     )
+
+    # Patch quality log to record the CSV source for this profile
+    qual <- attr(.data, 'quality')
+    qual$allocate$allocations[[pname]]$source      <- 'csv'
+    qual$allocate$allocations[[pname]]$source_file <- file
+    attr(.data, 'quality') <- qual
   }
 
   .data

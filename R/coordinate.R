@@ -357,6 +357,10 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
     rotated = !is.null(rotate),
     rotation_angle = if(!is.null(rotate)) theta else NA,
     rotation_degrees = if(!is.null(rotate)) theta * (180 / pi) else NA,
+    rotation_sideline = if(!is.null(rotate)) rotate else NULL,
+
+    # Outlier detection parameters
+    outlier_iqr_k = 3,
 
     # Post-transform summary
     x_range = if(all(is.na(output$x))) NA_real_ else diff(range(output$x, na.rm = TRUE)),
@@ -401,6 +405,7 @@ coordinate <- function(.data,
                       rotate = NULL,
                       drop_outliers = FALSE){
 
+  validate_motion_trace(.data, 'coordinate')
   conversions <- coord_conversions(from_units, to_units)
 
   output <- coord_drop_zero_gps(.data)

@@ -17,6 +17,8 @@
 #' @export
 derivate <- function(.data, use_filtered = TRUE, window = NULL, speed_floor = 0.5, signed_omega = FALSE){
 
+  validate_motion_trace(.data, 'derivate')
+
   # Default window = sample rate (1-second periods)
   meta <- attr(.data, 'metadata')
   default_window <- meta$interpolation_hz %||% meta$hz %||% meta$sample_rate %||% 5L
@@ -120,6 +122,10 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL, speed_floor = 0.
   qual <- attr(out, 'quality')
   if (is.null(qual)) qual <- list()
 
+  dep_versions <- vapply(c('dplyr', 'tidyr'), function(pkg) {
+    tryCatch(as.character(utils::packageVersion(pkg)), error = function(e) 'unknown')
+  }, character(1))
+
   qual$derivate <- list(
     step      = 'derivate',
     timestamp = Sys.time(),
@@ -140,6 +146,33 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL, speed_floor = 0.
       signed_omega     = signed_omega
     ),
 
+    algorithms = list(
+      distance_velocity = list(
+        method  = 'Euclidean finite difference',
+        formula = 'sqrt((x[i] - x[i-w])^2 + (y[i] - y[i-w])^2) / (t[i] - t[i-w])',
+        window  = w_vel
+      ),
+      heading = list(
+        method      = 'Four-quadrant arctangent',
+        formula     = 'atan2(dy, dx) * (180 / pi)',
+        speed_floor = speed_floor,
+        note        = 'NA assigned when velocity < speed_floor'
+      ),
+      angular_velocity = list(
+        method  = 'Heading finite difference with circular wrapping',
+        formula = '((heading[i] - heading[i-w] + 180) %% 360 - 180) / dt',
+        window  = w_ang,
+        signed  = signed_omega,
+        note    = if (signed_omega) 'Signed: positive = CCW, negative = CW'
+                  else 'Unsigned: absolute magnitude'
+      ),
+      acceleration = list(
+        method  = 'Velocity finite difference',
+        formula = '(velocity[i] - velocity[i-w]) / (t[i] - t[i-w])',
+        window  = w_acc
+      )
+    ),
+
     outputs = list(
       distance         = col_summary(out$distance),
       velocity         = col_summary(out$velocity),
@@ -148,6 +181,7 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL, speed_floor = 0.
       angular_velocity = col_summary(out$angular_velocity)
     ),
 
+    dependencies = setNames(dep_versions, c('dplyr', 'tidyr')),
     issues = issues
   )
 

@@ -1,12 +1,31 @@
 Package: motiongrammar
 Title: Tidy tools to analyse tracking data
 Version: 0.1
-Authors@R: 
+Authors@R:
     person("David",
-     "Corbett", 
+     "Corbett",
      , "corbett.davidm@gmail.com", role = c("aut", "cre"))
-Description: Motion Grammar is designed as a tidyverse-friendly package to load, process, analyse and summarise human tracking data from GPS, RFID and Optical Tracking Data Sources. 
-License: NA
+Description: Motion Grammar is designed as a tidyverse-friendly package to load,
+    process, analyse and summarise human tracking data from GPS, RFID and Optical
+    Tracking Data Sources.
+License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
+Imports:
+    dplyr,
+    tibble,
+    readr,
+    stringr,
+    lubridate,
+    sf,
+    zoo,
+    changepoint,
+    httr2,
+    jsonlite,
+    purrr,
+    stringdist
+Suggests:
+    signal,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
