@@ -1,3 +1,37 @@
+# segment name: mg_helpers ---
+
+#' Get the installed motiongrammar package version
+#'
+#' Uses utils::packageName() so the exact installed name is always used.
+#' Falls back to "dev" when the package is loaded in development mode or
+#' the version cannot be determined.
+#' @keywords internal
+.mg_pkg_version <- function() {
+  tryCatch({
+    pkg <- utils::packageName()
+    if (is.null(pkg) || !nzchar(pkg)) return("dev")
+    as.character(utils::packageVersion(pkg))
+  }, error = function(e) "dev")
+}
+
+#' Generate a unique step identifier for quality log entries
+#'
+#' Uses uuid::UUIDgenerate() when available; falls back to a timestamp-based
+#' string if the uuid package is not installed.
+#' @keywords internal
+.mg_step_id <- function() {
+  tryCatch(
+    uuid::UUIDgenerate(),
+    error = function(e) paste0("step-", format(Sys.time(), "%Y%m%d%H%M%OS3"))
+  )
+}
+
+#' Return current time as a UTC ISO 8601 string
+#' @keywords internal
+.mg_timestamp <- function() {
+  format(as.POSIXct(Sys.time(), tz = "UTC"), "%Y-%m-%dT%H:%M:%OS3Z")
+}
+
 # segment name: filt_sma ---
 
 #' Simple Moving Average filter
@@ -269,10 +303,14 @@ filtrate <- function(.data,
 
   # Apply filter to each target column, creating f_ prefixed output
   # On repeated passes, filter the already-filtered column (f_) if it exists
+  cols_before <- names(.data)
+  rows_before <- nrow(.data)
   output <- .data
+  input_cols_used <- stats::setNames(character(length(target_cols)), target_cols)
   for (col in target_cols) {
     f_col <- paste0('f_', col)
     source_col <- if (f_col %in% names(output) && sum(!is.na(output[[f_col]])) >= 4) f_col else col
+    input_cols_used[[col]] <- source_col
     output[[f_col]] <- do.call(safe_filter,
       c(list(vals = output[[source_col]], filter_fn = filter_fn), filter_args))
   }
@@ -295,7 +333,10 @@ filtrate <- function(.data,
     savgol      = list(window = window, poly_order = poly_order)
   )
 
-  output <- filt_quality_log(output, method, filter_params, target_cols)
+  output <- filt_quality_log(output, method, filter_params, target_cols,
+                             rows_before = rows_before,
+                             cols_before = cols_before,
+                             input_cols_used = input_cols_used)
 
   return(output)
 }
@@ -339,9 +380,15 @@ filtrate <- function(.data,
 #' @param method Character; the filter method that was applied.
 #' @param params Named list; the parameters used for this filter pass.
 #' @param target_cols Character vector; the source columns that were filtered.
+#' @param rows_before Integer; row count before this filter pass.
+#' @param cols_before Character vector; column names before this filter pass.
+#' @param input_cols_used Named character vector; for each target col, which
+#'   source column was actually filtered (col or f_col on a repeat pass).
 #' @return The motion_trace object with updated quality attribute.
 #' @keywords internal
-filt_quality_log <- function(output, method, params, target_cols = c('x', 'y', 'z')) {
+filt_quality_log <- function(output, method, params, target_cols = c('x', 'y', 'z'),
+                             rows_before = NULL, cols_before = NULL,
+                             input_cols_used = NULL) {
 
   qual <- attr(output, 'quality')
   if (is.null(qual)) qual <- list()
@@ -370,12 +417,19 @@ filt_quality_log <- function(output, method, params, target_cols = c('x', 'y', '
 
   # Build this filter pass entry
   pass_entry <- list(
-    method     = method,
-    timestamp  = Sys.time(),
-    parameters = params,
+    step_id         = .mg_step_id(),
+    package_version = .mg_pkg_version(),
+    method          = method,
+    timestamp       = .mg_timestamp(),
+    parameters      = params,
     target          = target_cols,
+    input_column_used = if (!is.null(input_cols_used)) as.list(input_cols_used) else NULL,
     axes_filtered   = axes_filtered,
     na_introduced   = na_counts,
+    rows_before     = if (!is.null(rows_before)) rows_before else nrow(output),
+    rows_after      = nrow(output),
+    cols_before     = if (!is.null(cols_before)) cols_before else names(output),
+    cols_after      = names(output),
     total_rows      = nrow(output),
     dependencies    = setNames(dep_versions, filt_deps)
   )

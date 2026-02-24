@@ -22,6 +22,7 @@
 #' @param gap_lengths Integer vector; lengths of each consecutive NA run (pre-interpolation).
 #' @param passthrough_na_counts Named integer vector; for each non-coordinate column present
 #'   in the input, the number of NAs introduced in time-gap rows inserted by grid expansion.
+#' @param cols_before Character vector; column names of the input before interpolation.
 #' @return The motion_trace object with updated quality attribute.
 #' @keywords internal
 interp_quality_log <- function(output, method, hz, max_gap_frames,
@@ -29,7 +30,8 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
                                 n_grid_rows, n_time_gaps, n_coord_na,
                                 n_filled_x, n_filled_y, n_filled_z,
                                 n_remaining_na_x, n_remaining_na_y,
-                                gap_lengths, passthrough_na_counts = integer(0)) {
+                                gap_lengths, passthrough_na_counts = integer(0),
+                                cols_before = NULL) {
 
   qual <- attr(output, 'quality')
   if (is.null(qual)) qual <- list()
@@ -117,8 +119,10 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
   }
 
   qual$interpolate <- list(
-    step      = "interpolate",
-    timestamp = Sys.time(),
+    step            = "interpolate",
+    step_id         = .mg_step_id(),
+    package_version = .mg_pkg_version(),
+    timestamp       = .mg_timestamp(),
 
     # Method
     method     = method_detail,
@@ -141,6 +145,12 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
 
     # Gap structure (pre-interpolation)
     gaps = gap_summary,
+
+    # Row / column provenance
+    rows_before  = n_input_rows,
+    rows_after   = nrow(output),
+    cols_before  = if (!is.null(cols_before)) cols_before else character(0),
+    cols_after   = names(output),
 
     # Interpolation results
     total_rows       = nrow(output),
@@ -208,6 +218,7 @@ interpolate <- function(.data,
 
   validate_motion_trace(.data, 'interpolate')
   n_input_rows <- nrow(.data)
+  cols_before <- names(.data)
 
   # Resolve hz: prefer explicit arg, then metadata, then fall back to 1
   if (is.null(hz)) {
@@ -342,7 +353,8 @@ interpolate <- function(.data,
     n_remaining_na_x   = na_x_after,
     n_remaining_na_y   = na_y_after,
     gap_lengths           = gap_lengths,
-    passthrough_na_counts = passthrough_na_counts
+    passthrough_na_counts = passthrough_na_counts,
+    cols_before           = cols_before
   )
 
   return(output)

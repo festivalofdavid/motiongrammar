@@ -4,7 +4,15 @@
 \alias{filt_quality_log}
 \title{Quality log for the filtrate step}
 \usage{
-filt_quality_log(output, method, params, target_cols = c("x", "y", "z"))
+filt_quality_log(
+  output,
+  method,
+  params,
+  target_cols = c("x", "y", "z"),
+  rows_before = NULL,
+  cols_before = NULL,
+  input_cols_used = NULL
+)
 }
 \arguments{
 \item{output}{A motion_trace object (post-filtering).}
@@ -14,6 +22,13 @@ filt_quality_log(output, method, params, target_cols = c("x", "y", "z"))
 \item{params}{Named list; the parameters used for this filter pass.}
 
 \item{target_cols}{Character vector; the source columns that were filtered.}
+
+\item{rows_before}{Integer; row count before this filter pass.}
+
+\item{cols_before}{Character vector; column names before this filter pass.}
+
+\item{input_cols_used}{Named character vector; for each target col, which
+source column was actually filtered (col or f_col on a repeat pass).}
 }
 \value{
 The motion_trace object with updated quality attribute.

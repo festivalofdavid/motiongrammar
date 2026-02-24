@@ -26,6 +26,8 @@ designate <- function(.data,
 ) {
 
   validate_motion_trace(.data, 'designate')
+  cols_before <- names(.data)
+  rows_before <- nrow(.data)
 
   # Default min_pts from Hz (5 seconds)
   if (is.null(min_pts)) {
@@ -33,7 +35,11 @@ designate <- function(.data,
     hz <- meta$interpolation_hz %||% meta$hz %||% meta$sample_rate %||% 10L
     min_pts <- as.integer(hz * 5)
   }
-  
+
+  # Will be populated for corbett method changepoint details
+  cp_indices <- NULL
+  cp_segment_lengths <- NULL
+
   if(method == 'corbett'){
   # 1. Work on the finite-velocity subset -- PELT cannot handle NAs.
   finite_idx <- which(is.finite(.data$velocity))
@@ -50,9 +56,16 @@ designate <- function(.data,
   )
 
   # 3. Categorise by changepoint (on the finite subset)
+  cp_indices <- changepoint::cpts(m_pelt)
+  if (length(cp_indices) > 0) {
+    seg_bounds <- c(0L, cp_indices, length(finite_vel))
+    cp_segment_lengths <- as.integer(diff(seg_bounds))
+  } else {
+    cp_segment_lengths <- length(finite_vel)
+  }
   pelt_id <- findInterval(
     seq_along(finite_vel),
-    c(0, changepoint::cpts(m_pelt))
+    c(0, cp_indices)
   )
 
   sub <- dplyr::tibble(
@@ -149,9 +162,11 @@ designate <- function(.data,
   if (is.null(qual)) qual <- list()
 
   qual$designate <- list(
-    step      = 'designate',
-    timestamp = Sys.time(),
-    method    = method,
+    step            = 'designate',
+    step_id         = .mg_step_id(),
+    package_version = .mg_pkg_version(),
+    timestamp       = .mg_timestamp(),
+    method          = method,
 
     algorithm = if (method == 'corbett') list(
       package         = 'changepoint',
@@ -160,11 +175,19 @@ designate <- function(.data,
       segmentation    = 'PELT',
       penalty         = 'SIC',
       v_threshold     = v_threshold,
-      min_pts         = min_pts
+      min_pts         = min_pts,
+      n_changepoints     = length(cp_indices),
+      changepoint_indices = as.integer(cp_indices),
+      segment_lengths    = as.integer(cp_segment_lengths)
     ) else NULL,
 
     source_file  = if (method == 'manual') file else NULL,
     cols_mapping = if (method == 'manual') cols else NULL,
+
+    rows_before    = rows_before,
+    rows_after     = nrow(refined),
+    cols_before    = cols_before,
+    cols_after     = names(refined),
 
     n_total_rows   = n_total,
     n_designated   = n_designated,

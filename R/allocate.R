@@ -27,6 +27,8 @@ allocate <- function(
 ) {
 
   validate_motion_trace(.data, 'allocate')
+  cols_before <- names(.data)
+  rows_before <- nrow(.data)
 
   col_suffix <- list(
     velocity = 'velocity_band',
@@ -77,11 +79,17 @@ allocate <- function(
 
   qual$allocate$allocations[[allocation_name]] <- list(
     allocation_name = allocation_name,
-    timestamp = Sys.time(),
-    source = 'manual',
-    source_file = NULL,
-    bands = band_detail,
-    algorithm = list(
+    step_id         = .mg_step_id(),
+    package_version = .mg_pkg_version(),
+    timestamp       = .mg_timestamp(),
+    source          = 'manual',
+    source_file     = NULL,
+    rows_before     = rows_before,
+    rows_after      = nrow(.data),
+    cols_before     = cols_before,
+    cols_after      = names(.data),
+    bands           = band_detail,
+    algorithm       = list(
       fn = 'findInterval',
       package = 'base',
       output_type = 'ordered factor',

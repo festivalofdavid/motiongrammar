@@ -13,14 +13,22 @@
 #'   \code{by = 'designation'} for within-segment calculations, or
 #'   \code{by = c('designation', 'allocation_1_velocity_band')} for
 #'   within-band calculations.
+#' @param log_expr Logical; if \code{TRUE}, the deparsed text of each column
+#'   expression is stored in the quality log for this call. Defaults to
+#'   \code{FALSE}.
 #' @return The input \code{motion_trace} with new or modified columns,
 #'   class and attributes intact.
 #' @export
-elaborate <- function(.data, ..., by = NULL) {
+elaborate <- function(.data, ..., by = NULL, log_expr = FALSE) {
 
   validate_motion_trace(.data, 'elaborate')
   cols_before <- names(.data)
+  rows_before <- nrow(.data)
   existing_groups <- dplyr::group_vars(.data)
+
+  # Capture expressions before evaluation (needed for both expression logging
+  # and for passing to dplyr::mutate() via !!! below)
+  quos <- rlang::enquos(...)
 
   # Stash attributes — dplyr::mutate drops custom ones
   meta <- attr(.data, 'metadata')
@@ -39,7 +47,7 @@ elaborate <- function(.data, ..., by = NULL) {
     }
     out <- .data |>
       dplyr::group_by(dplyr::across(dplyr::all_of(effective_by))) |>
-      dplyr::mutate(...) |>
+      dplyr::mutate(!!!quos) |>
       # Restore original grouping state — ungroup fully if input was ungrouped,
       # re-group to original vars if input was already grouped
       (\(x) if (length(existing_groups) > 0)
@@ -47,7 +55,7 @@ elaborate <- function(.data, ..., by = NULL) {
         else
           dplyr::ungroup(x))()
   } else {
-    out <- dplyr::mutate(.data, ...)
+    out <- dplyr::mutate(.data, !!!quos)
   }
 
   cols_after <- names(out)
@@ -88,11 +96,22 @@ elaborate <- function(.data, ..., by = NULL) {
 
   n <- length(qual$elaborate$calls) + 1L
   qual$elaborate$calls[[as.character(n)]] <- list(
-    timestamp = Sys.time(),
-    by = effective_by,
-    added = added,
-    modified = modified,
-    dependencies = list(dplyr = dplyr_version)
+    step_id         = .mg_step_id(),
+    package_version = .mg_pkg_version(),
+    timestamp       = .mg_timestamp(),
+    by              = effective_by,
+    added           = added,
+    modified        = modified,
+    rows_before     = rows_before,
+    rows_after      = nrow(out),
+    cols_before     = cols_before,
+    cols_after      = names(out),
+    expressions     = if (log_expr) {
+      vapply(quos, rlang::quo_text, character(1))
+    } else {
+      NULL
+    },
+    dependencies    = list(dplyr = dplyr_version)
   )
 
   attr(out, 'quality') <- qual

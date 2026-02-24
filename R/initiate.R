@@ -680,10 +680,7 @@ create_metadata <- function(session,
   time_range <- range(trace$unix_time, na.rm = TRUE)
   duration_sec <- if(!any(is.na(time_range))) diff(time_range) else NA
 
-  pkg_version <- tryCatch(
-    as.character(utils::packageVersion('motionGrammar')),
-    error = function(e) 'dev'
-  )
+  pkg_version <- .mg_pkg_version()
 
   metadata <- list(
     name = session_name,
@@ -1599,7 +1596,14 @@ print.motion_trace <- function(x, ...){
   }
 
   cat(sprintf("├─ Rows:    %s\n", format(nrow(x), big.mark = ",")))
-  cat(sprintf("├─ Columns: %s\n", paste(colnames(x), collapse = ', ')))
+  all_cols <- colnames(x)
+  n_cols <- length(all_cols)
+  if (n_cols > 15) {
+    shown <- paste(all_cols[seq_len(12)], collapse = ', ')
+    cat(sprintf("├─ Columns: %s ... + %d more\n", shown, n_cols - 12L))
+  } else {
+    cat(sprintf("├─ Columns: %s\n", paste(all_cols, collapse = ', ')))
+  }
 
   if(!is.null(qual) && !is.null(qual$initiate)){
     if(qual$initiate$qc_pass){

@@ -41,6 +41,8 @@ quantitate <- function(
 ) {
 
   validate_motion_trace(.data, 'quantitate')
+  cols_before <- names(.data)
+  rows_before <- nrow(.data)
   scope <- match.arg(scope, c('designation', 'session', 'active_session'))
 
   suffix_map <- c(
@@ -94,16 +96,22 @@ quantitate <- function(
     dplyr::summarise(..., .groups = 'drop')
 
   attr(result, 'quantitate_log') <- list(
-    timestamp = Sys.time(),
-    allocation = allocation,
-    derivative = if (!is.null(allocation)) derivative else NULL,
-    scope = scope,
-    active_only = active_only,
-    group_vars = group_vars,
-    band_cols = if (!is.null(allocation)) band_cols else NULL,
-    n_rows_in = n_rows_in,
-    n_rows_out = nrow(result),
-    dependencies = list(
+    step_id         = .mg_step_id(),
+    package_version = .mg_pkg_version(),
+    timestamp       = .mg_timestamp(),
+    allocation      = allocation,
+    derivative      = if (!is.null(allocation)) derivative else NULL,
+    scope           = scope,
+    active_only     = active_only,
+    group_vars      = group_vars,
+    band_cols       = if (!is.null(allocation)) band_cols else NULL,
+    rows_before     = rows_before,
+    rows_after      = nrow(result),
+    cols_before     = cols_before,
+    cols_after      = names(result),
+    n_rows_in       = n_rows_in,
+    n_rows_out      = nrow(result),
+    dependencies    = list(
       dplyr = tryCatch(as.character(utils::packageVersion('dplyr')), error = function(e) 'unknown')
     )
   )

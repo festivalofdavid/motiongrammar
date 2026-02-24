@@ -28,6 +28,8 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
                      derivatives = NULL){
 
   validate_motion_trace(.data, 'derivate')
+  cols_before <- names(.data)
+  rows_before <- nrow(.data)
 
   # Default window = sample rate (1-second periods)
   meta <- attr(.data, 'metadata')
@@ -256,8 +258,15 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
   )
 
   qual$derivate <- list(
-    step = 'derivate',
-    timestamp = Sys.time(),
+    step            = 'derivate',
+    step_id         = .mg_step_id(),
+    package_version = .mg_pkg_version(),
+    timestamp       = .mg_timestamp(),
+
+    rows_before = rows_before,
+    rows_after  = nrow(out),
+    cols_before = cols_before,
+    cols_after  = names(out),
 
     coordinate_source = list(
       requested_filtered = use_filtered,

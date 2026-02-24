@@ -4,7 +4,7 @@
 \alias{elaborate}
 \title{Elaborate a Motion Trace}
 \usage{
-elaborate(.data, ..., by = NULL)
+elaborate(.data, ..., by = NULL, log_expr = FALSE)
 }
 \arguments{
 \item{.data}{A \code{motion_trace} object.}
@@ -16,6 +16,10 @@ Rows are ungrouped after the mutation. Common uses:
 \code{by = 'designation'} for within-segment calculations, or
 \code{by = c('designation', 'allocation_1_velocity_band')} for
 within-band calculations.}
+
+\item{log_expr}{Logical; if \code{TRUE}, the deparsed text of each column
+expression is stored in the quality log for this call. Defaults to
+\code{FALSE}.}
 }
 \value{
 The input \code{motion_trace} with new or modified columns,

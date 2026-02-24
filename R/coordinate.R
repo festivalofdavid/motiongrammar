@@ -248,9 +248,12 @@ coord_drop_outliers <- function(output, k = 3){
 #' @param norm Logical or numeric; normalisation setting.
 #' @param rotate NULL or list; rotation setting.
 #' @param drop_outliers Logical; whether outliers were dropped.
+#' @param rows_before Integer; row count of the input before any transformation.
+#' @param cols_before Character vector; column names of the input before transformation.
 #' @return Data frame with quality attribute set.
 #' @keywords internal
-coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm, rotate, drop_outliers = FALSE){
+coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm, rotate, drop_outliers = FALSE,
+                              rows_before = NULL, cols_before = NULL){
   qual <- attr(output, 'quality')
   if(is.null(qual)) qual <- list()
 
@@ -331,8 +334,16 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
   theta <- attr(output, 'metadata')$rotation_angle
 
   qual$coordinate <- list(
-    step = "coordinate",
-    timestamp = Sys.time(),
+    step            = "coordinate",
+    step_id         = .mg_step_id(),
+    package_version = .mg_pkg_version(),
+    timestamp       = .mg_timestamp(),
+
+    # Row / column provenance
+    rows_before = if (!is.null(rows_before)) rows_before else nrow(output),
+    rows_after  = nrow(output),
+    cols_before = if (!is.null(cols_before)) cols_before else character(0),
+    cols_after  = names(output),
 
     # Conversion path
     from = from,
@@ -409,6 +420,8 @@ coordinate <- function(.data,
                       drop_outliers = FALSE){
 
   validate_motion_trace(.data, 'coordinate')
+  rows_before <- nrow(.data)
+  cols_before <- names(.data)
   conversions <- coord_conversions(from_units, to_units)
 
   output <- coord_drop_zero_gps(.data)
@@ -434,7 +447,8 @@ coordinate <- function(.data,
   attr(output, 'metadata')$units <- to_units
   attr(output, 'metadata')$origin_type <- if(isTRUE(norm)) 'starting_pos' else if(is.numeric(norm)) 'custom' else 'none'
 
-  output <- coord_quality_log(output, from, to, crs, from_units, to_units, norm, rotate, drop_outliers)
+  output <- coord_quality_log(output, from, to, crs, from_units, to_units, norm, rotate, drop_outliers,
+                              rows_before = rows_before, cols_before = cols_before)
 
   return(output)
 }

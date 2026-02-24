@@ -13,7 +13,9 @@ coord_quality_log(
   to_units,
   norm,
   rotate,
-  drop_outliers = FALSE
+  drop_outliers = FALSE,
+  rows_before = NULL,
+  cols_before = NULL
 )
 }
 \arguments{
@@ -34,6 +36,10 @@ coord_quality_log(
 \item{rotate}{NULL or list; rotation setting.}
 
 \item{drop_outliers}{Logical; whether outliers were dropped.}
+
+\item{rows_before}{Integer; row count of the input before any transformation.}
+
+\item{cols_before}{Character vector; column names of the input before transformation.}
 }
 \value{
 Data frame with quality attribute set.
