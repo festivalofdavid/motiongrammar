@@ -21,14 +21,14 @@ get_valid_tokens <- function(tokens,
   resp <- httr2::request('https://www.strava.com/oauth/token') |>
     httr2::req_body_form(client_id = tokens$client_id,
       client_secret = tokens$client_secret,
-      grant_type  = 'refresh_token',
+      grant_type = 'refresh_token',
       refresh_token = tokens$refresh_token) |>
     httr2::req_perform() |>
     httr2::resp_body_json()
 
-  tokens$access_token  <- resp$access_token
+  tokens$access_token <- resp$access_token
   tokens$refresh_token <- resp$refresh_token
-  tokens$expires_at    <- resp$expires_at
+  tokens$expires_at <- resp$expires_at
 
   path <- path.expand('~/strava_tokens.json')
   writeLines(jsonlite::toJSON(tokens,
@@ -50,37 +50,90 @@ get_valid_tokens <- function(tokens,
 #' @keywords internal
 get_physics_streams <- function(activity_id,
                                access_token,
-                               start_time_iso){
+                               start_time_iso,
+                               template = NULL){
 
   url <- paste0('https://www.strava.com/api/v3/activities/',
                 activity_id,
                 '/streams')
 
+  t <- if (!is.null(template)) template else list(
+    coord_system = "gps",
+    stream_time = "time",
+    stream_latlng = "latlng",
+    stream_lat = NULL,
+    stream_lng = NULL,
+    stream_altitude = "altitude",
+    stream_x = NULL,
+    stream_y = NULL,
+    stream_z = NULL,
+    stream_velocity = NULL,
+    stream_acceleration = NULL,
+    stream_extra = NULL
+  )
+
+  keys_vec <- unique(c(
+    t$stream_time,
+    t$stream_latlng, t$stream_lat, t$stream_lng,
+    t$stream_altitude,
+    t$stream_x, t$stream_y, t$stream_z,
+    t$stream_velocity, t$stream_acceleration,
+    if (!is.null(t$stream_extra)) unname(t$stream_extra) else NULL
+  ))
+  keys_vec <- keys_vec[!is.na(keys_vec)]
+
   resp <- httr2::request(url) |>
     httr2::req_auth_bearer_token(access_token) |>
-    httr2::req_url_query(keys = 'time,latlng,altitude',
+    httr2::req_url_query(keys = paste(keys_vec, collapse = ","),
                          key_by_type = 'true') |>
     httr2::req_perform() |>
     httr2::resp_body_json()
 
   start_unix <- as.numeric(lubridate::as_datetime(start_time_iso))
+  n_rows <- if (length(resp) > 0) length(resp[[1]]$data) else 0L
+  output <- list()
 
-  streams_df <- resp |>
-    purrr::imap(\(data_list, key){
-      if(key == 'latlng'){
-        tibble::tibble(lat = purrr::map_dbl(data_list$data, 1),
-          lng = purrr::map_dbl(data_list$data, 2))
-      } else {
-        tibble::tibble(!!key := unlist(data_list$data))
-      }
-    }) |>
-    dplyr::bind_cols()
+  for (key in names(resp)) {
+    raw <- resp[[key]]$data
+    if (key == t$stream_time) {
+      output[["unix_time"]] <- start_unix + unlist(raw)
+    } else if (!is.null(t$stream_latlng) && key == t$stream_latlng) {
+      output[["lat"]] <- purrr::map_dbl(raw, 1)
+      output[["lng"]] <- purrr::map_dbl(raw, 2)
+    } else if (!is.null(t$stream_lat) && key == t$stream_lat) {
+      output[["lat"]] <- unlist(raw)
+    } else if (!is.null(t$stream_lng) && key == t$stream_lng) {
+      output[["lng"]] <- unlist(raw)
+    } else if (!is.null(t$stream_altitude) && key == t$stream_altitude) {
+      output[["altitude"]] <- unlist(raw)
+    } else if (!is.null(t$stream_x) && key == t$stream_x) {
+      output[["x"]] <- unlist(raw)
+    } else if (!is.null(t$stream_y) && key == t$stream_y) {
+      output[["y"]] <- unlist(raw)
+    } else if (!is.null(t$stream_z) && key == t$stream_z) {
+      output[["z"]] <- unlist(raw)
+    } else if (!is.null(t$stream_velocity) && key == t$stream_velocity) {
+      output[["velocity"]] <- unlist(raw)
+    } else if (!is.null(t$stream_acceleration) && key == t$stream_acceleration) {
+      output[["acceleration"]] <- unlist(raw)
+    } else if (!is.null(t$stream_extra) && key %in% unname(t$stream_extra)) {
+      extra_nms <- names(t$stream_extra)
+      idx <- which(unname(t$stream_extra) == key)[1]
+      out_nm <- if (!is.null(extra_nms) && nchar(extra_nms[idx]) > 0) extra_nms[idx] else key
+      output[[out_nm]] <- unlist(raw)
+    }
+  }
 
-  final_trace <- streams_df |>
-    dplyr::mutate(unix_time = start_unix + time) |>
-    dplyr::select(unix_time, lat, lng, altitude)
+  coord_sys <- match.arg(t$coord_system %||% "gps", c("gps", "local"))
+  core_cols <- if (coord_sys == "gps") c("unix_time", "lat", "lng", "altitude")
+               else c("unix_time", "x", "y", "z")
 
-  return(final_trace)
+  for (col in core_cols) {
+    if (is.null(output[[col]])) output[[col]] <- rep(NA_real_, n_rows)
+  }
+
+  extra_cols <- setdiff(names(output), core_cols)
+  tibble::as_tibble(output[c(core_cols, extra_cols)])
 }
 
 # segment name: initiate_logic ---
@@ -109,18 +162,27 @@ initiate_guess_csv <- function(.data_path,
   target_commas <- line_stats$count[1]
   first_data_idx <- which(comma_counts == target_commas)[1]
 
-  if(is.na(first_data_idx) || first_data_idx < 2){
+  if(is.na(first_data_idx)){
     stop('Could not identify data block in file.')
   }
 
-  potential_headers <- all_lines[1:(first_data_idx - 1)]
-  header_candidates <- which(stringr::str_detect(potential_headers, '[A-Za-z]'))
+  if(first_data_idx >= 2){
+    # Non-standard CSV: header lives in the preamble rows before the data block
+    potential_headers <- all_lines[1:(first_data_idx - 1)]
+    header_candidates <- which(stringr::str_detect(potential_headers, '[A-Za-z]'))
 
-  if(length(header_candidates) == 0){
-    stop('Could not identify a valid header row.')
+    if(length(header_candidates) == 0){
+      stop('Could not identify a valid header row.')
+    }
+
+    header_idx <- utils::tail(header_candidates, 1)
+  } else {
+    # Standard CSV: header is line 1, same comma count as data rows
+    if(!stringr::str_detect(all_lines[1], '[A-Za-z]')){
+      stop('Could not identify a valid header row.')
+    }
+    header_idx <- 1L
   }
-
-  header_idx <- utils::tail(header_candidates, 1)
 
   raw_header <- all_lines[header_idx]
   raw_cols <- raw_header |>
@@ -136,6 +198,12 @@ initiate_guess_csv <- function(.data_path,
 
   clean_names <- make.unique(clean_names, sep = '_')
   data_lines <- all_lines[comma_counts == target_commas]
+
+  # When the header shares the same comma count as data rows it is included in
+  # data_lines; remove it so it isn't duplicated when prepended as raw_header
+  if(header_idx == first_data_idx){
+    data_lines <- data_lines[-1]
+  }
 
   if(length(data_lines) == 0){
     stop('No data rows found matching the identified structure.')
@@ -492,6 +560,13 @@ initiate_gpx <- function(.data_path){
     altitude = dplyr::coalesce(gpx_data$ele, NA_real_)
   )
 
+  attr(trace, 'column_mapping') <- list(
+    unix_time = "time",
+    lat = "latitude",
+    lng = "longitude",
+    altitude = "ele"
+  )
+
   return(trace)
 }
 
@@ -524,7 +599,7 @@ validate_motion_trace <- function(.data, call = 'function', requires = character
   }
 
   required <- c('unix_time', requires)
-  missing  <- setdiff(required, names(.data))
+  missing <- setdiff(required, names(.data))
   if (length(missing) > 0) {
     stop(
       call, '(): required column(s) missing: ',
@@ -555,7 +630,7 @@ validate_motion_trace <- function(.data, call = 'function', requires = character
 #' @export
 dplyr_reconstruct.motion_trace <- function(data, template) {
   attr(data, 'metadata') <- attr(template, 'metadata')
-  attr(data, 'quality')  <- attr(template, 'quality')
+  attr(data, 'quality') <- attr(template, 'quality')
   class(data) <- class(template)
   data
 }
@@ -737,7 +812,7 @@ convert_to_unix <- function(time_vec){
 
 # segment name: quality_log ---
 
-#' Initialize Quality Log
+#' Initialise Quality Log
 #' @keywords internal
 init_quality_log <- function(trace, source){
 
@@ -871,17 +946,17 @@ init_quality_log <- function(trace, source){
       warnings = if(length(warnings) > 0) unlist(warnings) else character(0),
 
       qc_thresholds = list(
-        completeness_issue      = 0.90,
-        completeness_warning    = 0.95,
-        hz_issue                = 1,
-        hz_warning              = 5,
-        gap_multiplier          = 3,
-        gap_pct_issue           = 5,
-        gap_pct_warning         = 2,
-        largest_gap_issue_sec   = 10,
+        completeness_issue = 0.90,
+        completeness_warning = 0.95,
+        hz_issue = 1,
+        hz_warning = 5,
+        gap_multiplier = 3,
+        gap_pct_issue = 5,
+        gap_pct_warning = 2,
+        largest_gap_issue_sec = 10,
         largest_gap_warning_sec = 5,
-        duplicate_pct_issue     = 0.01,
-        coord_range_threshold   = 0.0001
+        duplicate_pct_issue = 0.01,
+        coord_range_threshold = 0.0001
       )
     )
   )
@@ -1459,7 +1534,7 @@ metadata_report <- function(.data){
   cat("\n")
 
   # COLUMN MAPPING
-  if(!is.null(meta$column_mapping) && meta$source %in% c('guess_csv', 'manual_csv', 'template_csv')){
+  if(!is.null(meta$column_mapping) && meta$source %in% c('guess_csv', 'manual_csv', 'template_csv', 'gpx')){
     cat("COLUMN MAPPING ─────────────────────────────────────────\n")
 
     mapping <- meta$column_mapping
@@ -1546,7 +1621,7 @@ print.motion_trace <- function(x, ...){
 #' Initiate a Motion Grammar Session
 #'
 #' @param source Character; data source ('auto', 'strava', 'catapult_replay',
-#'   'guess_csv', 'manual_csv', 'gpx', 'template_csv')
+#'   'guess_csv', 'manual_csv', 'gpx', 'template_csv', 'generic')
 #' @param session Character; Strava ID/URL or file path
 #' @param coord_system Character; 'gps' or 'local'
 #' @param verbose Logical; print summary
@@ -1563,17 +1638,31 @@ initiate <- function(source = 'auto',
                      template = NULL,
                      ...){
 
-  # Resolve template: XML file path -> csv_template object
+  # Resolve template: XML file path -> csv_template or api_stream_template
   if (is.character(template) && length(template) == 1) {
-    template <- load_csv_template(template)
+    if (!file.exists(template))
+      stop("initiate(): template file not found: ", template)
+    xml_content <- paste(readLines(template, warn = FALSE), collapse = "\n")
+    if (grepl("<api_stream_template>", xml_content, fixed = TRUE)) {
+      template <- load_api_stream_template(template)
+    } else {
+      template <- load_csv_template(template)
+    }
   }
 
   # Auto-detect source
   if (!is.null(template)) {
-    if (source != 'auto' && source != 'template_csv')
-      warning("initiate(): template provided — ignoring source = '", source,
-              "' and using 'template_csv'")
-    source <- 'template_csv'
+    if (inherits(template, "csv_template")) {
+      if (source != 'auto' && source != 'template_csv')
+        warning("initiate(): template provided — ignoring source = '", source,
+                "' and using 'template_csv'")
+      source <- 'template_csv'
+    } else if (inherits(template, "api_stream_template")) {
+      if (source != 'auto' && source != template$api)
+        warning("initiate(): template provided — ignoring source = '", source,
+                "' and using '", template$api, "'")
+      source <- template$api
+    }
   } else if (source == 'auto' && file.exists(session)) {
     ext <- tolower(tools::file_ext(session))
     source <- switch(ext,
@@ -1593,8 +1682,12 @@ initiate <- function(source = 'auto',
         stringr::str_extract(session_str, '^\\d+$')
       }
 
+      api_tmpl <- if (inherits(template, "api_stream_template")) template else NULL
+      tok_path <- if (!is.null(api_tmpl)) api_tmpl$token_path else '~/strava_tokens.json'
+      if (!is.null(api_tmpl)) coord_system <- api_tmpl$coord_system
+
       tokens <- get_valid_tokens(
-        jsonlite::fromJSON(path.expand('~/strava_tokens.json')),
+        jsonlite::fromJSON(path.expand(tok_path)),
         verbose = verbose
       )
 
@@ -1603,14 +1696,15 @@ initiate <- function(source = 'auto',
         httr2::req_perform() |>
         httr2::resp_body_json()
 
-      trace <- get_physics_streams(activity_id, tokens$access_token, meta$start_date)
+      trace <- get_physics_streams(activity_id, tokens$access_token, meta$start_date,
+                                   template = api_tmpl)
 
       metadata <- create_metadata(
         session = activity_id,
         source = 'strava',
         trace = trace,
         device_info = NULL,
-        coord_system = 'gps'
+        coord_system = coord_system
       )
 
       metadata$session_id <- activity_id
@@ -1647,12 +1741,12 @@ initiate <- function(source = 'auto',
       trace <- trace_raw |>
         dplyr::rename(
           unix_raw = 1,
-          lat      = 2,
-          lng      = 3
+          lat = 2,
+          lng = 3
         ) |>
         dplyr::mutate(
           unix_time = convert_to_unix(unix_raw),
-          altitude  = NA_real_
+          altitude = NA_real_
         ) |>
         dplyr::select(unix_time, lat, lng, altitude)
 
@@ -1752,16 +1846,16 @@ initiate <- function(source = 'auto',
       col_mapping <- attr(trace, 'column_mapping')
 
       metadata <- create_metadata(
-        session     = session,
-        source      = 'template_csv',
-        trace       = trace,
+        session = session,
+        source = 'template_csv',
+        trace = trace,
         device_info = NULL,
         coord_system = coord_system
       )
 
       metadata$column_mapping <- col_mapping
 
-      attr(trace, 'metadata')       <- metadata
+      attr(trace, 'metadata') <- metadata
       attr(trace, 'column_mapping') <- NULL
 
       trace
@@ -1774,7 +1868,9 @@ initiate <- function(source = 'auto',
 
       trace <- initiate_gpx(session)
 
-      attr(trace, 'metadata') <- create_metadata(
+      col_mapping <- attr(trace, 'column_mapping')
+
+      metadata <- create_metadata(
         session = session,
         source = 'gpx',
         trace = trace,
@@ -1782,10 +1878,35 @@ initiate <- function(source = 'auto',
         coord_system = 'gps'
       )
 
+      metadata$column_mapping <- col_mapping
+
+      attr(trace, 'metadata') <- metadata
+      attr(trace, 'column_mapping') <- NULL
+
       trace
     },
 
-    stop("Unknown source. Use 'auto', 'strava', 'catapult_replay', 'guess_csv', 'manual_csv', 'gpx', or 'template_csv'.")
+    'generic' = {
+      api_tmpl <- if (inherits(template, "api_stream_template")) template else NULL
+      if (is.null(api_tmpl))
+        stop("initiate(): source = 'generic' requires an api_stream_template passed via template")
+
+      coord_system <- api_tmpl$coord_system
+      trace <- fetch_generic_streams(session, api_tmpl)
+
+      metadata <- create_metadata(
+        session = session,
+        source = 'generic',
+        trace = trace,
+        device_info = NULL,
+        coord_system = coord_system
+      )
+
+      attr(trace, 'metadata') <- metadata
+      trace
+    },
+
+    stop("Unknown source. Use 'auto', 'strava', 'catapult_replay', 'guess_csv', 'manual_csv', 'gpx', 'template_csv', or 'generic'.")
   )
 
   trace$is_interpolated <- FALSE
@@ -1898,23 +2019,23 @@ initiate <- function(source = 'auto',
 #'   \code{\link{initiate}}
 #' @export
 csv_template <- function(
-    coord_system     = c("gps", "local"),
+    coord_system = c("gps", "local"),
     col_unix,
-    col_lat          = NULL,
-    col_lng          = NULL,
-    col_altitude     = NULL,
-    col_x            = NULL,
-    col_y            = NULL,
-    col_z            = NULL,
-    col_velocity     = NULL,
+    col_lat = NULL,
+    col_lng = NULL,
+    col_altitude = NULL,
+    col_x = NULL,
+    col_y = NULL,
+    col_z = NULL,
+    col_velocity = NULL,
     col_acceleration = NULL,
-    col_extra        = NULL,
-    skip             = 0L,
-    max_empty_lines  = 3L,
-    comment          = "#",
+    col_extra = NULL,
+    skip = 0L,
+    max_empty_lines = 3L,
+    comment = "#",
     duplicate_method = c("return_error", "use_first", "use_second")
 ) {
-  coord_system     <- match.arg(coord_system)
+  coord_system <- match.arg(coord_system)
   duplicate_method <- match.arg(duplicate_method)
 
   if (missing(col_unix) || is.null(col_unix))
@@ -1940,18 +2061,18 @@ csv_template <- function(
 
   structure(
     list(
-      coord_system     = coord_system,
-      skip             = as.integer(skip),
-      max_empty_lines  = as.integer(max_empty_lines),
-      comment          = as.character(comment),
+      coord_system = coord_system,
+      skip = as.integer(skip),
+      max_empty_lines = as.integer(max_empty_lines),
+      comment = as.character(comment),
       duplicate_method = duplicate_method,
-      col_unix         = col_unix,
-      col_coord1       = col_coord1,
-      col_coord2       = col_coord2,
-      col_coord3       = col_coord3,
-      col_velocity     = col_velocity,
+      col_unix = col_unix,
+      col_coord1 = col_coord1,
+      col_coord2 = col_coord2,
+      col_coord3 = col_coord3,
+      col_velocity = col_velocity,
       col_acceleration = col_acceleration,
-      col_extra        = col_extra
+      col_extra = col_extra
     ),
     class = "csv_template"
   )
@@ -1977,20 +2098,20 @@ print.csv_template <- function(x, ...) {
     x$skip, x$max_empty_lines, x$comment, x$duplicate_method
   ))
   cat("  Column mapping:\n")
-  cat(sprintf("    unix_time    <- %s\n", fmt_ref(x$col_unix)))
+  cat(sprintf("    unix_time <- %s\n", fmt_ref(x$col_unix)))
   cat(sprintf("    %-12s <- %s\n", coord_names[1], fmt_ref(x$col_coord1)))
   cat(sprintf("    %-12s <- %s\n", coord_names[2], fmt_ref(x$col_coord2)))
   if (!is.null(x$col_coord3))
     cat(sprintf("    %-12s <- %s\n", coord_names[3], fmt_ref(x$col_coord3)))
   if (!is.null(x$col_velocity))
-    cat(sprintf("    velocity     <- %s\n", fmt_ref(x$col_velocity)))
+    cat(sprintf("    velocity <- %s\n", fmt_ref(x$col_velocity)))
   if (!is.null(x$col_acceleration))
     cat(sprintf("    acceleration <- %s\n", fmt_ref(x$col_acceleration)))
   if (!is.null(x$col_extra) && length(x$col_extra) > 0) {
     nms <- names(x$col_extra)
     parts <- vapply(seq_along(x$col_extra), function(i) {
       ref <- x$col_extra[[i]]
-      nm  <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else NULL
+      nm <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else NULL
       if (is.null(nm)) fmt_ref(ref)
       else sprintf("%s <- %s", nm, fmt_ref(ref))
     }, character(1))
@@ -2044,8 +2165,8 @@ save_csv_template <- function(template, path) {
   if (!is.null(template$col_extra) && length(template$col_extra) > 0) {
     nms <- names(template$col_extra)
     extra_tags <- vapply(seq_along(template$col_extra), function(i) {
-      ref    <- template$col_extra[[i]]
-      nm     <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else NULL
+      ref <- template$col_extra[[i]]
+      nm <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else NULL
       as_attr <- if (!is.null(nm))
         sprintf(' as="%s"', .xml_escape(nm))
       else
@@ -2087,18 +2208,18 @@ load_csv_template <- function(path) {
   }
 
   # Extract <columns> sub-section ((?s) = DOTALL, . matches newlines)
-  cols_m       <- regexpr("(?s)<columns>(.*?)</columns>", content, perl = TRUE)
+  cols_m <- regexpr("(?s)<columns>(.*?)</columns>", content, perl = TRUE)
   cols_section <- if (cols_m > 0) regmatches(content, cols_m) else content
 
   # Extract <extra_columns>
   col_extra <- NULL
-  extra_m   <- regexpr("(?s)<extra_columns>(.*?)</extra_columns>", content, perl = TRUE)
+  extra_m <- regexpr("(?s)<extra_columns>(.*?)</extra_columns>", content, perl = TRUE)
   if (extra_m > 0) {
     extra_section <- regmatches(content, extra_m)
 
     # New format: <col ref="..." as="..."/>
     ref_matches <- gregexpr('<col ref="[^"]*"[^/]*/>', extra_section, perl = TRUE)
-    ref_vals    <- regmatches(extra_section, ref_matches)[[1]]
+    ref_vals <- regmatches(extra_section, ref_matches)[[1]]
 
     if (length(ref_vals) > 0) {
       # Extract ref attribute value via backreference
@@ -2128,25 +2249,25 @@ load_csv_template <- function(path) {
     } else {
       # Legacy format: <col>value</col>
       old_matches <- gregexpr("<col>([^<]*)</col>", extra_section, perl = TRUE)
-      old_vals    <- regmatches(extra_section, old_matches)[[1]]
+      old_vals <- regmatches(extra_section, old_matches)[[1]]
       if (length(old_vals) > 0) {
         col_extra <- .xml_unescape(sub("^<col>", "", sub("</col>$", "", old_vals)))
       }
     }
   }
 
-  coord_system    <- get_tag("coord_system",    content) %||% "gps"
-  skip            <- as.integer(get_tag("skip",            content) %||% "0")
+  coord_system <- get_tag("coord_system",    content) %||% "gps"
+  skip <- as.integer(get_tag("skip",            content) %||% "0")
   max_empty_lines <- as.integer(get_tag("max_empty_lines", content) %||% "3")
-  comment         <- get_tag("comment",         content) %||% "#"
+  comment <- get_tag("comment",         content) %||% "#"
   duplicate_method <- get_tag("duplicate_method", content) %||% "return_error"
 
   # col_* values may be integer indices or column names
-  col_unix         <- .parse_col_ref(get_tag("col_unix",         cols_section))
-  col_coord1       <- .parse_col_ref(get_tag("col_coord1",       cols_section))
-  col_coord2       <- .parse_col_ref(get_tag("col_coord2",       cols_section))
-  col_coord3       <- .parse_col_ref(get_tag("col_coord3",       cols_section))
-  col_velocity     <- .parse_col_ref(get_tag("col_velocity",     cols_section))
+  col_unix <- .parse_col_ref(get_tag("col_unix",         cols_section))
+  col_coord1 <- .parse_col_ref(get_tag("col_coord1",       cols_section))
+  col_coord2 <- .parse_col_ref(get_tag("col_coord2",       cols_section))
+  col_coord3 <- .parse_col_ref(get_tag("col_coord3",       cols_section))
+  col_velocity <- .parse_col_ref(get_tag("col_velocity",     cols_section))
   col_acceleration <- .parse_col_ref(get_tag("col_acceleration", cols_section))
 
   if (is.null(col_unix))
@@ -2158,18 +2279,18 @@ load_csv_template <- function(path) {
 
   structure(
     list(
-      coord_system     = coord_system,
-      skip             = skip,
-      max_empty_lines  = max_empty_lines,
-      comment          = comment,
+      coord_system = coord_system,
+      skip = skip,
+      max_empty_lines = max_empty_lines,
+      comment = comment,
       duplicate_method = duplicate_method,
-      col_unix         = col_unix,
-      col_coord1       = col_coord1,
-      col_coord2       = col_coord2,
-      col_coord3       = col_coord3,
-      col_velocity     = col_velocity,
+      col_unix = col_unix,
+      col_coord1 = col_coord1,
+      col_coord2 = col_coord2,
+      col_coord3 = col_coord3,
+      col_velocity = col_velocity,
       col_acceleration = col_acceleration,
-      col_extra        = col_extra
+      col_extra = col_extra
     ),
     class = "csv_template"
   )
@@ -2242,9 +2363,9 @@ initiate_template_csv <- function(.data_path, template) {
     )]
 
   # Detect data end: stop at max_empty_lines consecutive blank rows
-  empty_flags       <- stringr::str_detect(all_lines, "^\\s*$")
+  empty_flags <- stringr::str_detect(all_lines, "^\\s*$")
   consecutive_empty <- 0L
-  stop_at           <- length(all_lines)
+  stop_at <- length(all_lines)
 
   for (i in seq_along(all_lines)) {
     if (empty_flags[i]) {
@@ -2276,25 +2397,25 @@ initiate_template_csv <- function(.data_path, template) {
   if (nrow(df) == 0)
     stop("csv_template: no data rows found after parsing")
 
-  all_cols  <- colnames(df)
+  all_cols <- colnames(df)
   col_lower <- stringr::str_to_lower(all_cols)
-  dm        <- template$duplicate_method
+  dm <- template$duplicate_method
 
   find <- function(ref) .find_col_ref(ref, all_cols, col_lower, dm)
 
-  unix_idx   <- find(template$col_unix)
+  unix_idx <- find(template$col_unix)
   coord1_idx <- find(template$col_coord1)
   coord2_idx <- find(template$col_coord2)
   coord3_idx <- find(template$col_coord3)   # NULL if not specified
-  vel_idx    <- find(template$col_velocity)
-  acc_idx    <- find(template$col_acceleration)
+  vel_idx <- find(template$col_velocity)
+  acc_idx <- find(template$col_acceleration)
 
   # Resolve col_extra: named/unnamed character or integer vector
   extra_resolved <- list()  # list of list(idx, out_name)
   if (!is.null(template$col_extra)) {
     nms <- names(template$col_extra)
     for (i in seq_along(template$col_extra)) {
-      ref    <- template$col_extra[[i]]
+      ref <- template$col_extra[[i]]
       usr_nm <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else NULL
 
       idx <- tryCatch(find(ref), error = function(e) {
@@ -2325,9 +2446,9 @@ initiate_template_csv <- function(.data_path, template) {
   # Build output tibble with standard columns (access by integer index)
   output <- tibble::tibble(
     unix_time = convert_to_unix(df[[unix_idx]]),
-    coord1    = suppressWarnings(as.numeric(df[[coord1_idx]])),
-    coord2    = suppressWarnings(as.numeric(df[[coord2_idx]])),
-    coord3    = if (!is.null(coord3_idx))
+    coord1 = suppressWarnings(as.numeric(df[[coord1_idx]])),
+    coord2 = suppressWarnings(as.numeric(df[[coord2_idx]])),
+    coord3 = if (!is.null(coord3_idx))
       suppressWarnings(as.numeric(df[[coord3_idx]]))
     else NA_real_
   )
@@ -2342,7 +2463,7 @@ initiate_template_csv <- function(.data_path, template) {
 
   # Extra columns: try numeric, fall back to character if mostly NA
   for (er in extra_resolved) {
-    raw         <- df[[er$idx]]
+    raw <- df[[er$idx]]
     num_attempt <- suppressWarnings(as.numeric(raw))
     output[[er$name]] <- if (mean(is.na(num_attempt)) <= 0.5) num_attempt else raw
   }
@@ -2367,5 +2488,628 @@ initiate_template_csv <- function(.data_path, template) {
 
   attr(output, "column_mapping") <- mapping
   output
+}
+
+
+# segment name: api_stream_template ---
+
+#' Create an API Stream Template
+#'
+#' Defines a reusable connection, authentication, and field-mapping
+#' specification for importing data from a REST JSON API. Pass the resulting
+#' object to \code{\link{initiate}()} via the \code{template} argument, or
+#' serialise it with \code{\link{save_api_stream_template}()}.
+#'
+#' \strong{Supported APIs:}
+#' \itemize{
+#'   \item \code{"strava"} — uses Strava's OAuth2 token-refresh flow and the
+#'     \href{https://developers.strava.com/docs/reference/#api-Streams}{Streams
+#'     endpoint}. Set \code{token_path} to your credentials JSON file.
+#'   \item \code{"generic"} — any REST API returning JSON. Specify \code{url},
+#'     \code{auth_type}, \code{auth_value}, and \code{response_format}.
+#' }
+#'
+#' \strong{URL templates:} In \code{url}, the literal string \code{\{session\}}
+#' is replaced at request time by the \code{session} argument passed to
+#' \code{\link{initiate}()}. For example,
+#' \code{"https://api.example.com/activities/\{session\}/data"}.
+#'
+#' \strong{Authentication (\code{auth_type}):}
+#' \itemize{
+#'   \item \code{"none"} — no credentials added.
+#'   \item \code{"bearer"} — \code{Authorization: Bearer <auth_value>} header.
+#'   \item \code{"api_key_header"} — \code{<auth_header>: <auth_value>} header
+#'     (default header name: \code{"X-API-Key"}).
+#'   \item \code{"api_key_query"} — appends \code{?<auth_param>=<auth_value>}
+#'     to the URL (default param name: \code{"api_key"}).
+#' }
+#' If \code{auth_value} begins with \code{$} it is treated as an environment
+#' variable name (e.g. \code{"$MY_API_KEY"} reads \code{Sys.getenv("MY_API_KEY")}),
+#' which keeps credentials out of saved XML files.
+#'
+#' \strong{Response formats (\code{response_format}):}
+#' \itemize{
+#'   \item \code{"records"} — an array of row objects:
+#'     \code{[\{"time": 0, "lat": 51.5, "lng": -0.1\}, ...]}.
+#'   \item \code{"columnar"} — an object of parallel arrays:
+#'     \code{\{"time": [...], "lat": [...], "lng": [...]\}}.
+#'   \item \code{"streams"} — Strava-style: each key holds a sub-object whose
+#'     \code{stream_data_key} entry (default \code{"data"}) is the array.
+#' }
+#' Use \code{data_path} (dot-separated) to navigate to the data node first,
+#' e.g. \code{"result.streams"} for \code{resp$result$streams}.
+#'
+#' \strong{Combined lat/lng (\code{stream_latlng}):} honoured in
+#' \code{"streams"} format where the API returns coordinate pairs as
+#' \code{[[lat, lng], ...]}. For \code{"records"} and \code{"columnar"}
+#' formats use separate \code{stream_lat}/\code{stream_lng}.
+#'
+#' \strong{Time formats (\code{time_type}):}
+#' \itemize{
+#'   \item \code{"unix"} — values are already Unix timestamps (seconds).
+#'   \item \code{"iso8601"} — values are ISO 8601 strings.
+#' }
+#'
+#' \code{stream_extra} accepts a named or unnamed character vector of
+#' additional stream/field keys to carry through:
+#' \itemize{
+#'   \item \code{c("heartrate")} — import as-is; output column named \code{heartrate}.
+#'   \item \code{c(heart_rate = "heartrate")} — import and rename to \code{heart_rate}.
+#' }
+#'
+#' @param api Character; \code{"strava"} or \code{"generic"}.
+#' @param coord_system Character; \code{"gps"} (lat/lng) or \code{"local"}
+#'   (x/y). Defaults to \code{"gps"}.
+#'
+#' @param token_path Character; \emph{Strava only.} Path to the OAuth2
+#'   credentials JSON file. Defaults to \code{"~/strava_tokens.json"}.
+#'
+#' @param url Character; \emph{Generic only.} Full endpoint URL. May contain
+#'   \code{\{session\}} as a placeholder for the session/activity identifier
+#'   supplied to \code{\link{initiate}()}. Required when
+#'   \code{api = "generic"}.
+#' @param request_method Character; HTTP method: \code{"GET"} (default) or
+#'   \code{"POST"}.
+#' @param request_params Named list; additional query parameters appended to
+#'   the URL for every request.
+#' @param request_body Named list; JSON body for \code{POST} requests.
+#' @param auth_type Character; authentication method. One of \code{"none"},
+#'   \code{"bearer"}, \code{"api_key_header"}, \code{"api_key_query"}.
+#'   Defaults to \code{"none"}.
+#' @param auth_value Character; token or API key. If it starts with \code{$},
+#'   interpreted as an environment variable name.
+#' @param auth_header Character; header name used when
+#'   \code{auth_type = "api_key_header"}. Defaults to \code{"X-API-Key"}.
+#' @param auth_param Character; query parameter name used when
+#'   \code{auth_type = "api_key_query"}. Defaults to \code{"api_key"}.
+#' @param response_format Character; JSON structure of the response:
+#'   \code{"records"}, \code{"columnar"}, or \code{"streams"}. Defaults to
+#'   \code{"records"}.
+#' @param data_path Character; dot-separated path to the data node within the
+#'   response (e.g. \code{"data"} or \code{"result.streams"}). Leave
+#'   \code{NULL} to use the top-level response.
+#' @param stream_data_key Character; for \code{response_format = "streams"},
+#'   the key within each stream object that holds the data array. Defaults to
+#'   \code{"data"}.
+#' @param time_type Character; how to interpret the time stream: \code{"unix"}
+#'   (already Unix seconds) or \code{"iso8601"} (ISO 8601 strings). Strava
+#'   uses its own internal offset mechanism and ignores this parameter.
+#'
+#' @param stream_time Character; stream/field key for timestamps. Required.
+#'   Defaults to \code{"time"} for Strava.
+#' @param stream_latlng Character; stream key for combined lat/lng pairs
+#'   (\code{"streams"} format only). Defaults to \code{"latlng"} for Strava
+#'   GPS. Use \code{stream_lat}/\code{stream_lng} for separate-field APIs.
+#' @param stream_lat Character; field key for latitude. Optional.
+#' @param stream_lng Character; field key for longitude. Optional.
+#' @param stream_altitude Character; field key for altitude. Optional.
+#'   Defaults to \code{"altitude"} for Strava GPS.
+#' @param stream_x Character; field key for x-coordinate (local). Required for
+#'   local coordinate systems.
+#' @param stream_y Character; field key for y-coordinate (local). Required for
+#'   local coordinate systems.
+#' @param stream_z Character; field key for z-coordinate (local). Optional.
+#' @param stream_velocity Character; field key for a pre-computed velocity.
+#'   Imported as \code{velocity}. Optional.
+#' @param stream_acceleration Character; field key for a pre-computed
+#'   acceleration. Imported as \code{acceleration}. Optional.
+#' @param stream_extra Named or unnamed character vector of additional
+#'   stream/field keys to carry through. See Details.
+#'
+#' @return An object of class \code{api_stream_template}.
+#' @seealso \code{\link{save_api_stream_template}},
+#'   \code{\link{load_api_stream_template}}, \code{\link{initiate}}
+#' @export
+api_stream_template <- function(
+    api = c("strava", "generic"),
+    coord_system = c("gps", "local"),
+    # Strava-specific
+    token_path = "~/strava_tokens.json",
+    # Generic REST
+    url = NULL,
+    request_method = c("GET", "POST"),
+    request_params = NULL,
+    request_body = NULL,
+    auth_type = c("none", "bearer", "api_key_header", "api_key_query"),
+    auth_value = NULL,
+    auth_header = "X-API-Key",
+    auth_param = "api_key",
+    response_format = c("records", "columnar", "streams"),
+    data_path = NULL,
+    stream_data_key = "data",
+    time_type = c("unix", "iso8601"),
+    # Stream/field mapping (all APIs)
+    stream_time = NULL,
+    stream_latlng = NULL,
+    stream_lat = NULL,
+    stream_lng = NULL,
+    stream_altitude = NULL,
+    stream_x = NULL,
+    stream_y = NULL,
+    stream_z = NULL,
+    stream_velocity = NULL,
+    stream_acceleration = NULL,
+    stream_extra = NULL
+) {
+  api <- match.arg(api)
+  coord_system <- match.arg(coord_system)
+  request_method <- match.arg(request_method)
+  auth_type <- match.arg(auth_type)
+  response_format <- match.arg(response_format)
+  time_type <- match.arg(time_type)
+
+  # ── Strava defaults ──────────────────────────────────────────────────────────
+  if (api == "strava") {
+    if (is.null(stream_time)) stream_time <- "time"
+    if (coord_system == "gps") {
+      if (is.null(stream_latlng) && is.null(stream_lat) && is.null(stream_lng))
+        stream_latlng <- "latlng"
+      if (is.null(stream_altitude))
+        stream_altitude <- "altitude"
+    }
+  }
+
+  # ── Validation ───────────────────────────────────────────────────────────────
+  if (is.null(stream_time) || !nchar(stream_time))
+    stop("api_stream_template(): stream_time is required")
+
+  if (api == "generic" && (is.null(url) || !nchar(url)))
+    stop("api_stream_template(): url is required when api = 'generic'")
+
+  if (auth_type != "none" && (is.null(auth_value) || !nchar(auth_value)))
+    stop("api_stream_template(): auth_value is required when auth_type = '", auth_type, "'")
+
+  if (coord_system == "gps") {
+    if (is.null(stream_latlng) && (is.null(stream_lat) || is.null(stream_lng)))
+      stop("api_stream_template(): coord_system = 'gps' requires stream_latlng ",
+           "or both stream_lat and stream_lng")
+  } else {
+    if (is.null(stream_x))
+      stop("api_stream_template(): coord_system = 'local' requires stream_x")
+    if (is.null(stream_y))
+      stop("api_stream_template(): coord_system = 'local' requires stream_y")
+  }
+
+  structure(
+    list(
+      api = api,
+      coord_system = coord_system,
+      # Strava
+      token_path = as.character(token_path),
+      # Generic REST
+      url = if (!is.null(url)) as.character(url) else NULL,
+      request_method = request_method,
+      request_params = request_params,
+      request_body = request_body,
+      auth_type = auth_type,
+      auth_value = if (!is.null(auth_value)) as.character(auth_value) else NULL,
+      auth_header = as.character(auth_header),
+      auth_param = as.character(auth_param),
+      response_format = response_format,
+      data_path = if (!is.null(data_path)) as.character(data_path) else NULL,
+      stream_data_key = as.character(stream_data_key),
+      time_type = time_type,
+      # Field mapping
+      stream_time = as.character(stream_time),
+      stream_latlng = if (!is.null(stream_latlng))       as.character(stream_latlng)       else NULL,
+      stream_lat = if (!is.null(stream_lat))          as.character(stream_lat)          else NULL,
+      stream_lng = if (!is.null(stream_lng))          as.character(stream_lng)          else NULL,
+      stream_altitude = if (!is.null(stream_altitude))     as.character(stream_altitude)     else NULL,
+      stream_x = if (!is.null(stream_x))            as.character(stream_x)            else NULL,
+      stream_y = if (!is.null(stream_y))            as.character(stream_y)            else NULL,
+      stream_z = if (!is.null(stream_z))            as.character(stream_z)            else NULL,
+      stream_velocity = if (!is.null(stream_velocity))     as.character(stream_velocity)     else NULL,
+      stream_acceleration = if (!is.null(stream_acceleration)) as.character(stream_acceleration) else NULL,
+      stream_extra = stream_extra
+    ),
+    class = "api_stream_template"
+  )
+}
+
+#' @method print api_stream_template
+#' @export
+print.api_stream_template <- function(x, ...) {
+  cat(sprintf("API Stream Template [%s / %s]\n", toupper(x$api), x$coord_system))
+
+  if (x$api == "strava") {
+    cat(sprintf("  Token path:  %s\n", x$token_path))
+  } else {
+    cat(sprintf("  URL:         %s\n", x$url))
+    cat(sprintf("  Method:      %s\n", x$request_method))
+    if (x$auth_type != "none") {
+      disp_val <- if (!is.null(x$auth_value) && startsWith(x$auth_value, "$"))
+        x$auth_value
+      else
+        "<hidden>"
+      cat(sprintf("  Auth:        %s  (%s)\n", x$auth_type, disp_val))
+    }
+    cat(sprintf("  Response:    %s", x$response_format))
+    if (!is.null(x$data_path)) cat(sprintf("  (path: %s)", x$data_path))
+    cat(sprintf("  |  time_type: %s\n", x$time_type))
+  }
+
+  cat("  Stream mapping:\n")
+  cat(sprintf("    unix_time <- %s\n", x$stream_time))
+  if (!is.null(x$stream_latlng))
+    cat(sprintf("    lat, lng <- %s (combined pairs)\n", x$stream_latlng))
+  if (!is.null(x$stream_lat))  cat(sprintf("    lat <- %s\n", x$stream_lat))
+  if (!is.null(x$stream_lng))  cat(sprintf("    lng <- %s\n", x$stream_lng))
+  if (!is.null(x$stream_altitude))
+    cat(sprintf("    altitude <- %s\n", x$stream_altitude))
+  if (!is.null(x$stream_x))    cat(sprintf("    x <- %s\n", x$stream_x))
+  if (!is.null(x$stream_y))    cat(sprintf("    y <- %s\n", x$stream_y))
+  if (!is.null(x$stream_z))    cat(sprintf("    z <- %s\n", x$stream_z))
+  if (!is.null(x$stream_velocity))
+    cat(sprintf("    velocity <- %s\n", x$stream_velocity))
+  if (!is.null(x$stream_acceleration))
+    cat(sprintf("    acceleration <- %s\n", x$stream_acceleration))
+  if (!is.null(x$stream_extra) && length(x$stream_extra) > 0) {
+    nms <- names(x$stream_extra)
+    parts <- vapply(seq_along(x$stream_extra), function(i) {
+      key <- x$stream_extra[[i]]
+      out_nm <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else key
+      if (out_nm == key) key else sprintf("%s <- %s", out_nm, key)
+    }, character(1))
+    cat(sprintf("  Extra streams: %s\n", paste(parts, collapse = ", ")))
+  }
+  invisible(x)
+}
+
+#' Save an API Stream Template to an XML File
+#'
+#' Serialises an \code{api_stream_template} object to a portable XML file that
+#' can be shared across scripts, checked into version control, or loaded later
+#' with \code{\link{load_api_stream_template}()}.
+#'
+#' @param template An \code{api_stream_template} object.
+#' @param path Character; file path for the output \code{.xml} file.
+#'
+#' @return Invisibly returns \code{template}.
+#' @seealso \code{\link{api_stream_template}},
+#'   \code{\link{load_api_stream_template}}
+#' @export
+save_api_stream_template <- function(template, path) {
+  if (!inherits(template, "api_stream_template"))
+    stop("save_api_stream_template(): template must be an api_stream_template object")
+
+  add_tag <- function(name, value, indent = "  ") {
+    if (is.null(value) || (length(value) == 1 && is.na(value)))
+      return(character(0))
+    sprintf("%s<%s>%s</%s>", indent, name, .xml_escape(as.character(value)), name)
+  }
+
+  lines <- c(
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    "<api_stream_template>",
+    add_tag("api",          template$api),
+    add_tag("coord_system", template$coord_system),
+    add_tag("token_path",   template$token_path),
+    "  <request>",
+    add_tag("url",            template$url,            "    "),
+    add_tag("request_method", template$request_method, "    "),
+    add_tag("data_path",      template$data_path,      "    "),
+    "  </request>",
+    "  <auth>",
+    add_tag("auth_type",   template$auth_type,   "    "),
+    add_tag("auth_value",  template$auth_value,  "    "),
+    add_tag("auth_header", template$auth_header, "    "),
+    add_tag("auth_param",  template$auth_param,  "    "),
+    "  </auth>",
+    "  <response>",
+    add_tag("response_format", template$response_format, "    "),
+    add_tag("stream_data_key", template$stream_data_key, "    "),
+    add_tag("time_type",       template$time_type,       "    "),
+    "  </response>",
+    "  <streams>",
+    add_tag("stream_time",         template$stream_time,         "    "),
+    add_tag("stream_latlng",       template$stream_latlng,       "    "),
+    add_tag("stream_lat",          template$stream_lat,          "    "),
+    add_tag("stream_lng",          template$stream_lng,          "    "),
+    add_tag("stream_altitude",     template$stream_altitude,     "    "),
+    add_tag("stream_x",            template$stream_x,            "    "),
+    add_tag("stream_y",            template$stream_y,            "    "),
+    add_tag("stream_z",            template$stream_z,            "    "),
+    add_tag("stream_velocity",     template$stream_velocity,     "    "),
+    add_tag("stream_acceleration", template$stream_acceleration, "    "),
+    "  </streams>"
+  )
+
+  if (!is.null(template$stream_extra) && length(template$stream_extra) > 0) {
+    nms <- names(template$stream_extra)
+    extra_tags <- vapply(seq_along(template$stream_extra), function(i) {
+      ref <- template$stream_extra[[i]]
+      nm <- if (!is.null(nms) && nchar(nms[i]) > 0) nms[i] else NULL
+      as_attr <- if (!is.null(nm)) sprintf(' as="%s"', .xml_escape(nm)) else ""
+      sprintf('    <stream ref="%s"%s/>', .xml_escape(ref), as_attr)
+    }, character(1))
+    lines <- c(lines, "  <extra_streams>", extra_tags, "  </extra_streams>")
+  }
+
+  lines <- c(lines, "</api_stream_template>")
+  writeLines(lines, path)
+  invisible(template)
+}
+
+#' Load an API Stream Template from an XML File
+#'
+#' Reads an XML file written by \code{\link{save_api_stream_template}()} and
+#' returns an \code{api_stream_template} object ready to pass to
+#' \code{\link{initiate}()}.
+#'
+#' @param path Character; path to the XML file.
+#'
+#' @return An \code{api_stream_template} object.
+#' @seealso \code{\link{api_stream_template}},
+#'   \code{\link{save_api_stream_template}}
+#' @export
+load_api_stream_template <- function(path) {
+  if (!file.exists(path))
+    stop("load_api_stream_template(): file not found: ", path)
+
+  content <- paste(readLines(path, warn = FALSE), collapse = "\n")
+
+  get_tag <- function(tag, text) {
+    pattern <- sprintf("<%s>([^<]*)</%s>", tag, tag)
+    m <- regmatches(text, regexpr(pattern, text, perl = TRUE))
+    if (length(m) == 0 || identical(m, character(0))) return(NULL)
+    val <- sub(sprintf("^<%s>", tag), "", sub(sprintf("</%s>$", tag), "", m))
+    val <- .xml_unescape(val)
+    if (nchar(val) == 0) NULL else val
+  }
+
+  extract_section <- function(tag, text) {
+    pat <- sprintf("(?s)<%s>(.*?)</%s>", tag, tag)
+    m <- regexpr(pat, text, perl = TRUE)
+    if (m > 0) regmatches(text, m) else text
+  }
+
+  request_section <- extract_section("request",  content)
+  auth_section <- extract_section("auth",     content)
+  response_section <- extract_section("response", content)
+  streams_section <- extract_section("streams",  content)
+
+  api <- get_tag("api",          content) %||% "strava"
+  coord_system <- get_tag("coord_system", content) %||% "gps"
+  token_path <- get_tag("token_path",   content) %||% "~/strava_tokens.json"
+
+  url <- get_tag("url",            request_section)
+  request_method <- get_tag("request_method", request_section) %||% "GET"
+  data_path <- get_tag("data_path",      request_section)
+
+  auth_type <- get_tag("auth_type",   auth_section) %||% "none"
+  auth_value <- get_tag("auth_value",  auth_section)
+  auth_header <- get_tag("auth_header", auth_section) %||% "X-API-Key"
+  auth_param <- get_tag("auth_param",  auth_section) %||% "api_key"
+
+  response_format <- get_tag("response_format", response_section) %||% "records"
+  stream_data_key <- get_tag("stream_data_key", response_section) %||% "data"
+  time_type <- get_tag("time_type",       response_section) %||% "unix"
+
+  stream_time <- get_tag("stream_time",         streams_section)
+  stream_latlng <- get_tag("stream_latlng",       streams_section)
+  stream_lat <- get_tag("stream_lat",          streams_section)
+  stream_lng <- get_tag("stream_lng",          streams_section)
+  stream_altitude <- get_tag("stream_altitude",     streams_section)
+  stream_x <- get_tag("stream_x",            streams_section)
+  stream_y <- get_tag("stream_y",            streams_section)
+  stream_z <- get_tag("stream_z",            streams_section)
+  stream_velocity <- get_tag("stream_velocity",     streams_section)
+  stream_acceleration <- get_tag("stream_acceleration", streams_section)
+
+  if (is.null(stream_time))
+    stop("load_api_stream_template(): <stream_time> not found in <streams>")
+
+  stream_extra <- NULL
+  extra_m <- regexpr("(?s)<extra_streams>(.*?)</extra_streams>", content, perl = TRUE)
+  if (extra_m > 0) {
+    extra_section <- regmatches(content, extra_m)
+    ref_matches <- gregexpr('<stream ref="[^"]*"[^/]*/>', extra_section, perl = TRUE)
+    ref_vals <- regmatches(extra_section, ref_matches)[[1]]
+
+    if (length(ref_vals) > 0) {
+      refs <- .xml_unescape(gsub('^.*<stream ref="([^"]*)".*$', "\\1", ref_vals))
+      as_vals <- vapply(ref_vals, function(tag) {
+        if (!grepl('as="', tag, fixed = TRUE)) return(NA_character_)
+        .xml_unescape(gsub('^.*as="([^"]*)".*$', "\\1", tag))
+      }, character(1))
+      nms <- ifelse(is.na(as_vals), "", as_vals)
+      stream_extra <- stats::setNames(refs, nms)
+    }
+  }
+
+  structure(
+    list(
+      api = api,
+      coord_system = coord_system,
+      token_path = token_path,
+      url = url,
+      request_method = request_method,
+      request_params = NULL,
+      request_body = NULL,
+      auth_type = auth_type,
+      auth_value = auth_value,
+      auth_header = auth_header,
+      auth_param = auth_param,
+      response_format = response_format,
+      data_path = data_path,
+      stream_data_key = stream_data_key,
+      time_type = time_type,
+      stream_time = stream_time,
+      stream_latlng = stream_latlng,
+      stream_lat = stream_lat,
+      stream_lng = stream_lng,
+      stream_altitude = stream_altitude,
+      stream_x = stream_x,
+      stream_y = stream_y,
+      stream_z = stream_z,
+      stream_velocity = stream_velocity,
+      stream_acceleration = stream_acceleration,
+      stream_extra = stream_extra
+    ),
+    class = "api_stream_template"
+  )
+}
+
+#' Fetch and parse data from a generic REST JSON API
+#' @keywords internal
+fetch_generic_streams <- function(session, template) {
+
+  t <- template
+
+  # ── Build URL ─────────────────────────────────────────────────────────────
+  url <- gsub("{session}", as.character(session), t$url, fixed = TRUE)
+
+  # ── Resolve auth_value (env var support) ─────────────────────────────────
+  auth_val <- t$auth_value
+  if (!is.null(auth_val) && startsWith(auth_val, "$")) {
+    env_var <- substring(auth_val, 2)
+    auth_val <- Sys.getenv(env_var, unset = NA_character_)
+    if (is.na(auth_val) || !nchar(auth_val))
+      stop(sprintf("fetch_generic_streams(): environment variable '%s' is not set", env_var))
+  }
+
+  # ── Build request ─────────────────────────────────────────────────────────
+  req <- httr2::request(url)
+
+  if (t$auth_type == "bearer") {
+    req <- httr2::req_auth_bearer_token(req, auth_val)
+  } else if (t$auth_type == "api_key_header") {
+    req <- do.call(httr2::req_headers, c(list(req), stats::setNames(list(auth_val), t$auth_header)))
+  } else if (t$auth_type == "api_key_query") {
+    req <- do.call(httr2::req_url_query, c(list(req), stats::setNames(list(auth_val), t$auth_param)))
+  }
+
+  if (!is.null(t$request_params) && length(t$request_params) > 0)
+    req <- do.call(httr2::req_url_query, c(list(req), t$request_params))
+
+  if (t$request_method == "POST") {
+    if (!is.null(t$request_body))
+      req <- httr2::req_body_json(req, t$request_body)
+    req <- httr2::req_method(req, "POST")
+  }
+
+  resp <- req |> httr2::req_perform() |> httr2::resp_body_json()
+
+  # ── Navigate to data node ─────────────────────────────────────────────────
+  data <- resp
+  if (!is.null(t$data_path) && nchar(t$data_path) > 0) {
+    for (key in strsplit(t$data_path, ".", fixed = TRUE)[[1]]) {
+      if (is.null(data[[key]]))
+        stop(sprintf("fetch_generic_streams(): data_path key '%s' not found in response", key))
+      data <- data[[key]]
+    }
+  }
+
+  # ── Extract raw fields as character vectors ───────────────────────────────
+  raw_fields <- switch(t$response_format,
+
+    "records" = {
+      if (!is.list(data) || length(data) == 0)
+        stop("fetch_generic_streams(): response_format = 'records' expects a non-empty array")
+      field_names <- names(data[[1]])
+      result <- lapply(field_names, function(nm) {
+        vapply(data, function(rec) {
+          val <- rec[[nm]]
+          if (is.null(val)) NA_character_ else as.character(val[[1]])
+        }, character(1))
+      })
+      stats::setNames(result, field_names)
+    },
+
+    "columnar" = {
+      lapply(data, function(v) as.character(unlist(v)))
+    },
+
+    "streams" = {
+      sdk <- t$stream_data_key %||% "data"
+      lapply(data, function(stream) as.character(unlist(stream[[sdk]])))
+    }
+  )
+
+  n_rows <- length(raw_fields[[1]])
+  output <- list()
+
+  # ── Time ──────────────────────────────────────────────────────────────────
+  time_raw <- raw_fields[[t$stream_time]]
+  if (is.null(time_raw))
+    stop(sprintf("fetch_generic_streams(): stream_time '%s' not found in response", t$stream_time))
+
+  output[["unix_time"]] <- switch(t$time_type,
+    "unix"    = as.numeric(time_raw),
+    "iso8601" = as.numeric(lubridate::as_datetime(time_raw)),
+    stop("fetch_generic_streams(): unsupported time_type '", t$time_type, "'")
+  )
+
+  # ── Coordinates ───────────────────────────────────────────────────────────
+  # stream_latlng (combined pairs) only in streams/columnar where original data has pairs
+  if (!is.null(t$stream_latlng) && t$response_format %in% c("streams", "columnar")) {
+    pairs_src <- if (t$response_format == "streams") data[[t$stream_latlng]][[t$stream_data_key %||% "data"]]
+                 else data[[t$stream_latlng]]
+    if (!is.null(pairs_src)) {
+      output[["lat"]] <- purrr::map_dbl(pairs_src, 1)
+      output[["lng"]] <- purrr::map_dbl(pairs_src, 2)
+    }
+  } else {
+    if (!is.null(t$stream_lat) && t$stream_lat %in% names(raw_fields))
+      output[["lat"]] <- as.numeric(raw_fields[[t$stream_lat]])
+    if (!is.null(t$stream_lng) && t$stream_lng %in% names(raw_fields))
+      output[["lng"]] <- as.numeric(raw_fields[[t$stream_lng]])
+  }
+
+  .map_field <- function(key, out_nm) {
+    if (!is.null(key) && key %in% names(raw_fields))
+      output[[out_nm]] <<- as.numeric(raw_fields[[key]])
+  }
+  .map_field(t$stream_altitude,     "altitude")
+  .map_field(t$stream_x,            "x")
+  .map_field(t$stream_y,            "y")
+  .map_field(t$stream_z,            "z")
+  .map_field(t$stream_velocity,     "velocity")
+  .map_field(t$stream_acceleration, "acceleration")
+
+  # ── Extra streams ─────────────────────────────────────────────────────────
+  if (!is.null(t$stream_extra) && length(t$stream_extra) > 0) {
+    extra_nms <- names(t$stream_extra)
+    for (i in seq_along(t$stream_extra)) {
+      key <- t$stream_extra[[i]]
+      out_nm <- if (!is.null(extra_nms) && nchar(extra_nms[i]) > 0) extra_nms[i] else key
+      if (key %in% names(raw_fields)) {
+        raw <- raw_fields[[key]]
+        num <- suppressWarnings(as.numeric(raw))
+        output[[out_nm]] <- if (mean(is.na(num)) <= 0.5) num else raw
+      }
+    }
+  }
+
+  # ── Fill missing core cols and assemble ───────────────────────────────────
+  core_cols <- if (t$coord_system == "local") c("unix_time", "x", "y", "z")
+               else c("unix_time", "lat", "lng", "altitude")
+
+  for (col in core_cols) {
+    if (is.null(output[[col]])) output[[col]] <- rep(NA_real_, n_rows)
+  }
+
+  extra_cols <- setdiff(names(output), core_cols)
+  tibble::as_tibble(output[c(core_cols, extra_cols)])
 }
 

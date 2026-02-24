@@ -19,8 +19,8 @@
 allocate <- function(
   .data,
   allocation = list(
-    velocity         = c(0, 2, 4, 6, 8),
-    acceleration     = c(0, 1, 2, 3, 4),
+    velocity = c(0, 2, 4, 6, 8),
+    acceleration = c(0, 1, 2, 3, 4),
     angular_velocity = c(0, 100, 200, 300, 400)
   ),
   allocation_name = 'allocation_1'
@@ -29,16 +29,16 @@ allocate <- function(
   validate_motion_trace(.data, 'allocate')
 
   col_suffix <- list(
-    velocity         = 'velocity_band',
-    acceleration     = 'acceleration_band',
-    angular_velocity = 'angularvelocity_band'
+    velocity = 'velocity_band',
+    acceleration = 'acceleration_band',
+    angular_velocity = 'angular_velocity_band'
   )
 
   use_abs <- c('acceleration', 'angular_velocity')
 
   .apply_bands <- function(x, thresholds) {
-    labels <- paste0('band_', seq_along(thresholds))
-    idx    <- findInterval(x, thresholds)
+    labels <- paste0('band_', seq_len(length(thresholds) - 1))
+    idx <- findInterval(x, thresholds)
     idx[idx == 0 | idx > length(labels)] <- NA_integer_
     factor(labels[idx], levels = labels, ordered = TRUE)
   }
@@ -55,7 +55,7 @@ allocate <- function(
       next
     }
 
-    vals    <- if (deriv %in% use_abs) abs(.data[[deriv]]) else .data[[deriv]]
+    vals <- if (deriv %in% use_abs) abs(.data[[deriv]]) else .data[[deriv]]
     out_col <- paste0(allocation_name, '_', col_suffix[[deriv]])
     .data[[out_col]] <- .apply_bands(vals, allocation[[deriv]])
     applied <- c(applied, deriv)
@@ -64,11 +64,10 @@ allocate <- function(
   # ── Quality log ────────────────────────────────────────────────────────────
   band_detail <- lapply(applied, function(deriv) {
     thresholds <- allocation[[deriv]]
-    ranges <- vapply(seq_along(thresholds), function(i) {
-      upper <- if (i < length(thresholds)) thresholds[i + 1] else Inf
-      sprintf('[%g, %g)', thresholds[i], upper)
+    ranges <- vapply(seq_len(length(thresholds) - 1), function(i) {
+      sprintf('[%g, %g)', thresholds[i], thresholds[i + 1])
     }, character(1))
-    list(n_bands = length(thresholds), thresholds = thresholds, ranges = ranges)
+    list(n_bands = length(thresholds) - 1L, thresholds = thresholds, ranges = ranges)
   })
   names(band_detail) <- applied
 
@@ -78,16 +77,16 @@ allocate <- function(
 
   qual$allocate$allocations[[allocation_name]] <- list(
     allocation_name = allocation_name,
-    timestamp       = Sys.time(),
-    source          = 'manual',
-    source_file     = NULL,
-    bands           = band_detail,
+    timestamp = Sys.time(),
+    source = 'manual',
+    source_file = NULL,
+    bands = band_detail,
     algorithm = list(
-      fn            = 'findInterval',
-      package       = 'base',
-      output_type   = 'ordered factor',
-      out_of_range  = 'NA (values outside band range are not assigned)',
-      abs_applied   = 'acceleration, angular_velocity (absolute value taken before banding)'
+      fn = 'findInterval',
+      package = 'base',
+      output_type = 'ordered factor',
+      out_of_range = 'NA (values outside band range are not assigned)',
+      abs_applied = 'acceleration, angular_velocity (absolute value taken before banding)'
     )
   )
 
@@ -132,7 +131,7 @@ allocate_csv <- function(.data, file) {
   profiles <- utils::read.csv(file, stringsAsFactors = FALSE)
 
   required <- c('profile_name', 'target_derivative', 'profile_start', 'profile_end')
-  missing  <- setdiff(required, names(profiles))
+  missing <- setdiff(required, names(profiles))
   if (length(missing) > 0) {
     stop(
       "allocate_csv(): CSV is missing required columns: ",
@@ -141,24 +140,24 @@ allocate_csv <- function(.data, file) {
   }
 
   for (pname in unique(profiles$profile_name)) {
-    p_rows     <- profiles[profiles$profile_name == pname, ]
+    p_rows <- profiles[profiles$profile_name == pname, ]
     allocation <- list()
 
     for (deriv in unique(p_rows$target_derivative)) {
-      d_rows              <- p_rows[p_rows$target_derivative == deriv, ]
-      d_rows              <- d_rows[order(d_rows$profile_start), ]
+      d_rows <- p_rows[p_rows$target_derivative == deriv, ]
+      d_rows <- d_rows[order(d_rows$profile_start), ]
       allocation[[deriv]] <- d_rows$profile_start
     }
 
     .data <- allocate(
       .data,
-      allocation      = allocation,
+      allocation = allocation,
       allocation_name = pname
     )
 
     # Patch quality log to record the CSV source for this profile
     qual <- attr(.data, 'quality')
-    qual$allocate$allocations[[pname]]$source      <- 'csv'
+    qual$allocate$allocations[[pname]]$source <- 'csv'
     qual$allocate$allocations[[pname]]$source_file <- file
     attr(.data, 'quality') <- qual
   }

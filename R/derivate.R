@@ -36,24 +36,24 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
 
   # Resolve per-derivative windows
   if (is.null(window)) {
-    w_vel  <- default_window
-    w_ang  <- default_window
-    w_acc  <- default_window
+    w_vel <- default_window
+    w_ang <- default_window
+    w_acc <- default_window
     w_jerk <- default_window
   } else if (is.list(window)) {
-    w_vel  <- as.integer(window$velocity %||% window$distance %||% default_window)
-    w_ang  <- as.integer(window$angular_velocity %||% default_window)
-    w_acc  <- as.integer(window$acceleration %||% default_window)
+    w_vel <- as.integer(window$velocity %||% default_window)
+    w_ang <- as.integer(window$angular_velocity %||% default_window)
+    w_acc <- as.integer(window$acceleration %||% default_window)
     w_jerk <- as.integer(window$jerk %||% default_window)
   } else {
-    w_vel  <- as.integer(window)
-    w_ang  <- w_vel
-    w_acc  <- w_vel
+    w_vel <- as.integer(window)
+    w_ang <- w_vel
+    w_acc <- w_vel
     w_jerk <- w_vel
   }
 
   # Resolve derivatives parameter
-  standard_set      <- c("velocity", "acceleration", "angular_velocity")
+  standard_set <- c("velocity", "acceleration", "angular_velocity")
   valid_derivatives <- c("velocity", "acceleration", "angular_velocity", "jerk", "lateral_g")
 
   if (is.null(derivatives)) {
@@ -101,7 +101,7 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
       .dy_vel = .data[[y_col]] - dplyr::lag(.data[[y_col]], n = w_vel),
       distance = sqrt(.dx_vel^2 + .dy_vel^2),
       velocity = distance / .dt_vel,
-      heading  = dplyr::if_else(
+      heading = dplyr::if_else(
         velocity >= speed_floor,
         atan2(.dy_vel, .dx_vel) * (180 / pi),
         NA_real_
@@ -113,8 +113,8 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
     dplyr::mutate(
       .dt_ang = unix_time - dplyr::lag(unix_time, n = w_ang),
       .dt_ang = dplyr::if_else(.dt_ang <= 0 | is.na(.dt_ang), NA_real_, .dt_ang),
-      .dh     = heading - dplyr::lag(heading, n = w_ang),
-      .dh     = ((.dh + 180) %% 360) - 180,
+      .dh = heading - dplyr::lag(heading, n = w_ang),
+      .dh = ((.dh + 180) %% 360) - 180,
       angular_velocity = if (signed_omega) .dh / .dt_ang else abs(.dh / .dt_ang)
     )
 
@@ -164,10 +164,10 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
   col_summary <- function(x) {
     x_fin <- x[is.finite(x)]
     list(
-      n_valid  = length(x_fin),
-      n_na     = sum(is.na(x)),
-      min      = if (length(x_fin) > 0) min(x_fin) else NA_real_,
-      max      = if (length(x_fin) > 0) max(x_fin) else NA_real_
+      n_valid = length(x_fin),
+      n_na = sum(is.na(x)),
+      min = if (length(x_fin) > 0) min(x_fin) else NA_real_,
+      max = if (length(x_fin) > 0) max(x_fin) else NA_real_
     )
   }
 
@@ -189,59 +189,59 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
 
   # Build parameters list
   params <- list(
-    window_default   = as.integer(window_default),
-    velocity         = w_vel,
-    acceleration     = w_acc,
+    window_default = as.integer(window_default),
+    velocity = w_vel,
+    acceleration = w_acc,
     angular_velocity = w_ang,
-    speed_floor      = speed_floor,
-    signed_omega     = signed_omega,
-    derivatives      = requested
+    speed_floor = speed_floor,
+    signed_omega = signed_omega,
+    derivatives = requested
   )
   if ("jerk" %in% requested) params$jerk <- w_jerk
 
   # Build algorithms list
   algos <- list(
     distance_velocity = list(
-      method  = 'Euclidean finite difference',
+      method = 'Euclidean finite difference',
       formula = 'sqrt((x[i] - x[i-w])^2 + (y[i] - y[i-w])^2) / (t[i] - t[i-w])',
-      window  = w_vel
+      window = w_vel
     ),
     heading = list(
-      method      = 'Four-quadrant arctangent',
-      formula     = 'atan2(dy, dx) * (180 / pi)',
+      method = 'Four-quadrant arctangent',
+      formula = 'atan2(dy, dx) * (180 / pi)',
       speed_floor = speed_floor,
-      note        = 'NA assigned when velocity < speed_floor'
+      note = 'NA assigned when velocity < speed_floor'
     ),
     angular_velocity = list(
-      method  = 'Heading finite difference with circular wrapping',
+      method = 'Heading finite difference with circular wrapping',
       formula = '((heading[i] - heading[i-w] + 180) %% 360 - 180) / dt',
-      window  = w_ang,
-      signed  = signed_omega,
-      note    = if (signed_omega) 'Signed: positive = CCW, negative = CW'
+      window = w_ang,
+      signed = signed_omega,
+      note = if (signed_omega) 'Signed: positive = CCW, negative = CW'
                 else 'Unsigned: absolute magnitude'
     ),
     acceleration = list(
-      method  = 'Velocity finite difference',
+      method = 'Velocity finite difference',
       formula = '(velocity[i] - velocity[i-w]) / (t[i] - t[i-w])',
-      window  = w_acc
+      window = w_acc
     )
   )
 
   if ("jerk" %in% requested) {
     algos$jerk <- list(
-      method  = 'Acceleration finite difference',
+      method = 'Acceleration finite difference',
       formula = '(acceleration[i] - acceleration[i-w]) / (t[i] - t[i-w])',
-      window  = w_jerk,
-      note    = 'Experimental: third-order derivative; amplifies GPS positional noise'
+      window = w_jerk,
+      note = 'Experimental: third-order derivative; amplifies GPS positional noise'
     )
   }
 
   if ("lateral_g" %in% requested) {
     algos$lateral_g <- list(
-      method      = 'Centripetal acceleration proxy normalised to g',
-      formula     = 'velocity * (angular_velocity * pi / 180) / 9.80665',
+      method = 'Centripetal acceleration proxy normalised to g',
+      formula = 'velocity * (angular_velocity * pi / 180) / 9.80665',
       speed_floor = speed_floor,
-      note        = 'Experimental: set to 0 when velocity < speed_floor; sign follows signed_omega'
+      note = 'Experimental: set to 0 when velocity < speed_floor; sign follows signed_omega'
     )
   }
 
@@ -256,28 +256,28 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
   )
 
   qual$derivate <- list(
-    step      = 'derivate',
+    step = 'derivate',
     timestamp = Sys.time(),
 
     coordinate_source = list(
       requested_filtered = use_filtered,
-      used_filtered      = used_filtered,
-      x_col              = x_col,
-      y_col              = y_col
+      used_filtered = used_filtered,
+      x_col = x_col,
+      y_col = y_col
     ),
 
-    parameters   = params,
-    algorithms   = algos,
-    outputs      = outputs,
+    parameters = params,
+    algorithms = algos,
+    outputs = outputs,
     dependencies = setNames(dep_versions, c('dplyr', 'tidyr')),
-    issues       = issues
+    issues = issues
   )
 
   attr(out, 'quality') <- qual
 
   # ── Metadata ───────────────────────────────────────────────────────────────
-  meta$derivate_source   <- if (used_filtered) 'filtered (f_x, f_y)' else 'raw (x, y)'
-  meta$derivate_windows  <- windows_used
+  meta$derivate_source <- if (used_filtered) 'filtered (f_x, f_y)' else 'raw (x, y)'
+  meta$derivate_windows <- windows_used
   attr(out, 'metadata') <- meta
 
   out

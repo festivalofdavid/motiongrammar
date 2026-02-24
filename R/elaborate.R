@@ -19,7 +19,7 @@
 elaborate <- function(.data, ..., by = NULL) {
 
   validate_motion_trace(.data, 'elaborate')
-  cols_before     <- names(.data)
+  cols_before <- names(.data)
   existing_groups <- dplyr::group_vars(.data)
 
   # Stash attributes — dplyr::mutate drops custom ones
@@ -42,16 +42,16 @@ elaborate <- function(.data, ..., by = NULL) {
       dplyr::mutate(...) |>
       # Restore original grouping state — ungroup fully if input was ungrouped,
       # re-group to original vars if input was already grouped
-      { if (length(existing_groups) > 0)
-          dplyr::group_by(., dplyr::across(dplyr::all_of(existing_groups)))
+      (\(x) if (length(existing_groups) > 0)
+          dplyr::group_by(x, dplyr::across(dplyr::all_of(existing_groups)))
         else
-          dplyr::ungroup(.) }()
+          dplyr::ungroup(x))()
   } else {
     out <- dplyr::mutate(.data, ...)
   }
 
   cols_after <- names(out)
-  added    <- setdiff(cols_after, cols_before)
+  added <- setdiff(cols_after, cols_before)
   modified <- Filter(
     function(col) !identical(.data[[col]], out[[col]]),
     intersect(cols_before, cols_after)
@@ -88,10 +88,10 @@ elaborate <- function(.data, ..., by = NULL) {
 
   n <- length(qual$elaborate$calls) + 1L
   qual$elaborate$calls[[as.character(n)]] <- list(
-    timestamp    = Sys.time(),
-    by           = effective_by,
-    added        = added,
-    modified     = modified,
+    timestamp = Sys.time(),
+    by = effective_by,
+    added = added,
+    modified = modified,
     dependencies = list(dplyr = dplyr_version)
   )
 

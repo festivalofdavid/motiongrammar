@@ -15,7 +15,7 @@ initiate(
 }
 \arguments{
 \item{source}{Character; data source ('auto', 'strava', 'catapult_replay',
-'guess_csv', 'manual_csv', 'gpx', 'template_csv')}
+'guess_csv', 'manual_csv', 'gpx', 'template_csv', 'generic')}
 
 \item{session}{Character; Strava ID/URL or file path}
 

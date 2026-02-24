@@ -2,11 +2,11 @@
 % Please edit documentation in R/initiate.R
 \name{init_quality_log}
 \alias{init_quality_log}
-\title{Initialize Quality Log}
+\title{Initialise Quality Log}
 \usage{
 init_quality_log(trace, source)
 }
 \description{
-Initialize Quality Log
+Initialise Quality Log
 }
 \keyword{internal}

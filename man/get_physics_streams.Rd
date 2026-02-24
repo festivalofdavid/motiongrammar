@@ -4,7 +4,7 @@
 \alias{get_physics_streams}
 \title{Fetch Physics Streams from Strava}
 \usage{
-get_physics_streams(activity_id, access_token, start_time_iso)
+get_physics_streams(activity_id, access_token, start_time_iso, template = NULL)
 }
 \arguments{
 \item{activity_id}{Character; the Strava activity ID.}

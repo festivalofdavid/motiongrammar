@@ -33,9 +33,9 @@
 #' @export
 quantitate <- function(
   .data,
-  allocation  = 'allocation_1',
-  derivative  = 'velocity',
-  scope       = 'designation',
+  allocation = 'allocation_1',
+  derivative = 'velocity',
+  scope = 'designation',
   active_only = FALSE,
   ...
 ) {
@@ -44,9 +44,9 @@ quantitate <- function(
   scope <- match.arg(scope, c('designation', 'session', 'active_session'))
 
   suffix_map <- c(
-    velocity         = 'velocity_band',
-    acceleration     = 'acceleration_band',
-    angular_velocity = 'angularvelocity_band'
+    velocity = 'velocity_band',
+    acceleration = 'acceleration_band',
+    angular_velocity = 'angular_velocity_band'
   )
 
   if (!is.null(allocation)) {
@@ -84,7 +84,7 @@ quantitate <- function(
   # Grouping: designation scope always includes designation column;
   # session scopes group by bands only (empty = single-row result when NULL).
   # Pre-existing groups (e.g. from group_by()) are prepended.
-  core_vars  <- if (scope == 'designation') c('designation', band_cols) else band_cols
+  core_vars <- if (scope == 'designation') c('designation', band_cols) else band_cols
   group_vars <- union(existing_groups, core_vars)
 
   n_rows_in <- nrow(.data)
@@ -94,16 +94,16 @@ quantitate <- function(
     dplyr::summarise(..., .groups = 'drop')
 
   attr(result, 'quantitate_log') <- list(
-    timestamp       = Sys.time(),
-    allocation      = allocation,
-    derivative      = if (!is.null(allocation)) derivative else NULL,
-    scope           = scope,
-    active_only     = active_only,
-    group_vars      = group_vars,
-    band_cols       = if (!is.null(allocation)) band_cols else NULL,
-    n_rows_in       = n_rows_in,
-    n_rows_out      = nrow(result),
-    dependencies    = list(
+    timestamp = Sys.time(),
+    allocation = allocation,
+    derivative = if (!is.null(allocation)) derivative else NULL,
+    scope = scope,
+    active_only = active_only,
+    group_vars = group_vars,
+    band_cols = if (!is.null(allocation)) band_cols else NULL,
+    n_rows_in = n_rows_in,
+    n_rows_out = nrow(result),
+    dependencies = list(
       dplyr = tryCatch(as.character(utils::packageVersion('dplyr')), error = function(e) 'unknown')
     )
   )
@@ -130,21 +130,21 @@ quantitate <- function(
 #' @export
 band_duration <- function(
   .data,
-  allocation  = 'allocation_1',
-  derivative  = 'velocity',
-  scope       = 'designation',
+  allocation = 'allocation_1',
+  derivative = 'velocity',
+  scope = 'designation',
   active_only = FALSE
 ) {
 
-  meta     <- attr(.data, 'metadata')
-  hz       <- meta$interpolation_hz %||% meta$hz %||% meta$sample_rate %||% 10L
+  meta <- attr(.data, 'metadata')
+  hz <- meta$interpolation_hz %||% meta$hz %||% meta$sample_rate %||% 10L
   interval <- 1 / hz
 
   quantitate(
     dplyr::mutate(.data, .row_dur = interval),
-    allocation  = allocation,
-    derivative  = derivative,
-    scope       = scope,
+    allocation = allocation,
+    derivative = derivative,
+    scope = scope,
     active_only = active_only,
     duration_sec = sum(.row_dur, na.rm = TRUE)
   )

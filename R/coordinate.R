@@ -115,7 +115,11 @@ coord_normalise <- function(output, norm){
     origin_x <- norm[1]
     origin_y <- norm[2]
     origin_z <- if(length(norm) == 3) norm[3] else 0
+  } else {
+    stop("coordinate(): 'norm' must be TRUE/FALSE or a numeric vector of length >= 2.")
   }
+
+  attr(output, 'norm_origin') <- c(origin_x, origin_y, origin_z)
 
   output |>
     dplyr::mutate(
@@ -349,8 +353,7 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
     # Normalisation
     normalised = !isFALSE(norm),
     origin_type = if(isTRUE(norm)) 'starting_pos' else if(is.numeric(norm)) 'custom' else 'none',
-    origin_values = if(isTRUE(norm)) c(output$x[1] + (output$x[1] - output$x[1]),
-                                         output$y[1] + (output$y[1] - output$y[1]))
+    origin_values = if(isTRUE(norm)) attr(output, 'norm_origin')[1:2]
                     else if(is.numeric(norm)) norm else NA,
 
     # Rotation
