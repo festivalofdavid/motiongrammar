@@ -32,4 +32,15 @@ Imports:
 Suggests:
     signal,
     testthat (>= 3.0.0)
+Collate:
+    'utils_quality.R'
+    'allocate.R'
+    'coordinate.R'
+    'derivate.R'
+    'designate.R'
+    'elaborate.R'
+    'filtrate.R'
+    'initiate.R'
+    'interpolate.R'
+    'quantitate.R'
 Config/testthat/edition: 3

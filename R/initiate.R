@@ -376,6 +376,8 @@ initiate_guess_csv <- function(.data_path,
 
   # Store column mapping as attribute for later retrieval
   attr(output, 'column_mapping') <- mappings
+  attr(output, 'skip') <- as.integer(header_idx - 1L)
+  attr(output, 'coord_system_detected') <- source
 
   return(output)
 }
@@ -708,7 +710,7 @@ create_metadata <- function(session,
     column_mapping = NULL,
 
     created_timestamp = Sys.time(),
-    created_by = 'motionGrammar',
+    created_by = 'motiongrammar',
     package_version = pkg_version
   )
 
@@ -914,48 +916,59 @@ init_quality_log <- function(trace, source){
 
   qc_pass <- length(issues) == 0
 
-  quality_log <- list(
-    initiate = list(
-      step = "initiate",
-      timestamp = Sys.time(),
-      source = source,
+  initiate_entry <- list(
+    step            = "initiate",
+    step_id         = .mg_step_id(),
+    package_version = .mg_pkg_version(),
+    timestamp       = .mg_timestamp(),
+    source          = source,
 
-      total_rows = nrow(trace),
-      valid_coordinates = valid_coords,
-      completeness = completeness,
+    rows_before = 0L,
+    rows_after  = nrow(trace),
+    cols_before = character(0),
+    cols_after  = names(trace),
 
-      native_hz = native_hz,
-      median_dt = median_dt,
-      duration_sec = as.numeric(duration_sec),
-      time_range_unix = time_range,
+    total_rows = nrow(trace),
+    valid_coordinates = valid_coords,
+    completeness = completeness,
 
-      n_gaps = length(gaps),
-      largest_gap_sec = largest_gap,
-      gap_percentage = gap_percentage,
+    native_hz = native_hz,
+    median_dt = median_dt,
+    duration_sec = as.numeric(duration_sec),
+    time_range_unix = time_range,
 
-      lat_range = if('lat' %in% names(trace)) diff(range(trace$lat, na.rm = TRUE)) else NA,
-      lng_range = if('lng' %in% names(trace)) diff(range(trace$lng, na.rm = TRUE)) else NA,
+    n_gaps = length(gaps),
+    largest_gap_sec = largest_gap,
+    gap_percentage = gap_percentage,
 
-      n_duplicates = n_duplicates,
+    lat_range = if('lat' %in% names(trace)) diff(range(trace$lat, na.rm = TRUE)) else NA,
+    lng_range = if('lng' %in% names(trace)) diff(range(trace$lng, na.rm = TRUE)) else NA,
 
-      qc_pass = qc_pass,
-      issues = if(length(issues) > 0) unlist(issues) else character(0),
-      warnings = if(length(warnings) > 0) unlist(warnings) else character(0),
+    n_duplicates = n_duplicates,
 
-      qc_thresholds = list(
-        completeness_issue = 0.90,
-        completeness_warning = 0.95,
-        hz_issue = 1,
-        hz_warning = 5,
-        gap_multiplier = 3,
-        gap_pct_issue = 5,
-        gap_pct_warning = 2,
-        largest_gap_issue_sec = 10,
-        largest_gap_warning_sec = 5,
-        duplicate_pct_issue = 0.01,
-        coord_range_threshold = 0.0001
-      )
+    column_mapping = attr(trace, 'metadata')$column_mapping,
+
+    qc_pass = qc_pass,
+    issues = if(length(issues) > 0) unlist(issues) else character(0),
+    warnings = if(length(warnings) > 0) unlist(warnings) else character(0),
+
+    qc_thresholds = list(
+      completeness_issue = 0.90,
+      completeness_warning = 0.95,
+      hz_issue = 1,
+      hz_warning = 5,
+      gap_multiplier = 3,
+      gap_pct_issue = 5,
+      gap_pct_warning = 2,
+      largest_gap_issue_sec = 10,
+      largest_gap_warning_sec = 5,
+      duplicate_pct_issue = 0.01,
+      coord_range_threshold = 0.0001
     )
+  )
+
+  quality_log <- list(
+    initiate = list(initiate_entry)
   )
 
   return(quality_log)
@@ -989,15 +1002,32 @@ quality_report <- function(.data){
   steps <- names(qual)
   cat(sprintf("Processing: %s\n\n", paste(steps, collapse = " → ")))
 
+  # Steps that store a list of run entries (one entry appended per call).
+  # filtrate / allocate / elaborate use their own nested structures.
+  run_tracked <- c('initiate', 'coordinate', 'interpolate', 'derivate',
+                   'designate', 'quantitate')
+
   for(step_name in steps){
-    s <- qual[[step_name]]
+    # Resolve the most recent entry (or use the structure directly for steps
+    # that manage their own multi-entry format).
+    if (step_name %in% run_tracked) {
+      run_entries <- qual[[step_name]]
+      n_runs      <- length(run_entries)
+      s           <- run_entries[[n_runs]]
+    } else {
+      s      <- qual[[step_name]]
+      n_runs <- 1L
+    }
 
     cat("───────────────────────────────────────────────────────────\n")
     cat(sprintf(" %s\n", toupper(step_name)))
     cat("───────────────────────────────────────────────────────────\n")
+    if (n_runs > 1L) {
+      cat(sprintf("  [%d run(s) recorded — showing most recent]\n\n", n_runs))
+    }
 
     if(step_name == "initiate"){
-      cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
+      cat(sprintf("  Timestamp:     %s\n", .mg_fmt_ts(s$timestamp)))
       cat(sprintf("  Rows:          %s\n", format(s$total_rows, big.mark = ",")))
       cat(sprintf("  Completeness:  %.1f%% (%s valid coordinates)\n",
                   s$completeness * 100,
@@ -1047,7 +1077,7 @@ quality_report <- function(.data){
     }
 
     else if(step_name == "coordinate"){
-      cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
+      cat(sprintf("  Timestamp:     %s\n", .mg_fmt_ts(s$timestamp)))
       cat(sprintf("  Rows:          %s\n", format(s$total_rows, big.mark = ",")))
       cat("\n")
 
@@ -1139,7 +1169,7 @@ quality_report <- function(.data){
     }
 
     else if(step_name == "interpolate"){
-      cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
+      cat(sprintf("  Timestamp:     %s\n", .mg_fmt_ts(s$timestamp)))
       cat(sprintf("  Rows in:       %s\n", format(s$input_rows, big.mark = ",")))
       cat(sprintf("  Rows out:      %s\n", format(s$total_rows, big.mark = ",")))
       cat("\n")
@@ -1229,7 +1259,7 @@ quality_report <- function(.data){
       for(i in seq_along(s$passes)){
         p <- s$passes[[i]]
         cat(sprintf("  Pass %d: %s\n", i, toupper(p$method)))
-        cat(sprintf("    Timestamp:   %s\n", format(p$timestamp, "%Y-%m-%d %H:%M:%S")))
+        cat(sprintf("    Timestamp:   %s\n", .mg_fmt_ts(p$timestamp)))
         cat(sprintf("    Rows:        %s\n", format(p$total_rows, big.mark = ",")))
 
         # Parameters
@@ -1257,7 +1287,7 @@ quality_report <- function(.data){
     }
 
     else if(step_name == "derivate"){
-      cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
+      cat(sprintf("  Timestamp:     %s\n", .mg_fmt_ts(s$timestamp)))
       cat("\n")
 
       # Coordinate source
@@ -1314,7 +1344,7 @@ quality_report <- function(.data){
     }
 
     else if(step_name == "designate"){
-      cat(sprintf("  Timestamp:     %s\n", format(s$timestamp, "%Y-%m-%d %H:%M:%S")))
+      cat(sprintf("  Timestamp:     %s\n", .mg_fmt_ts(s$timestamp)))
       cat("\n")
 
       if(s$method == 'corbett'){
@@ -1387,33 +1417,48 @@ quality_report <- function(.data){
     }
 
     else if(step_name == "elaborate"){
-      calls <- s$calls
-      cat(sprintf("  Calls: %d\n\n", length(calls)))
+      # Each call to elaborate() appends one entry — show all of them,
+      # since each represents a distinct column transformation.
+      entries <- qual$elaborate
+      cat(sprintf("  Calls: %d\n\n", length(entries)))
 
-      for(i in seq_along(calls)){
-        c <- calls[[i]]
-        cat(sprintf("  Call %d  —  %s\n", i, format(c$timestamp, "%Y-%m-%d %H:%M:%S")))
+      for(i in seq_along(entries)){
+        e <- entries[[i]]
+        cat(sprintf("  Call %d  —  %s\n", i, .mg_fmt_ts(e$timestamp)))
 
-        if(!is.null(c$by)){
-          cat(sprintf("    Grouped by:  %s\n", paste(c$by, collapse = ', ')))
+        if(!is.null(e$by) && length(e$by) > 0){
+          cat(sprintf("    Grouped by:  %s\n", paste(e$by, collapse = ', ')))
         } else {
           cat("    Grouped by:  (none)\n")
         }
 
-        if(length(c$added) > 0){
-          cat(sprintf("    Added:       %s\n", paste(c$added, collapse = ', ')))
+        if(length(e$added) > 0){
+          cat(sprintf("    Added:       %s\n", paste(e$added, collapse = ', ')))
         } else {
           cat("    Added:       (none)\n")
         }
 
-        if(length(c$modified) > 0){
-          cat(sprintf("    Modified:    %s\n", paste(c$modified, collapse = ', ')))
+        if(length(e$modified) > 0){
+          cat(sprintf("    Modified:    %s\n", paste(e$modified, collapse = ', ')))
         } else {
           cat("    Modified:    (none)\n")
         }
 
         cat("\n")
       }
+    }
+
+    else if(step_name == "quantitate"){
+      cat(sprintf("  Timestamp:     %s\n", .mg_fmt_ts(s$timestamp)))
+      cat(sprintf("  Scope:         %s\n", s$scope))
+      cat(sprintf("  Allocation:    %s\n",
+                  if (!is.null(s$allocation)) s$allocation else "(none)"))
+      if (!is.null(s$derivative)) {
+        cat(sprintf("  Derivative(s): %s\n", paste(s$derivative, collapse = ', ')))
+      }
+      cat(sprintf("  Rows in:       %s\n", format(s$rows_before, big.mark = ",")))
+      cat(sprintf("  Rows out:      %s\n", format(s$rows_after,  big.mark = ",")))
+      cat("\n")
     }
   }
 
@@ -1551,7 +1596,7 @@ metadata_report <- function(.data){
   }
 
   cat("PROCESSING INFORMATION ─────────────────────────────────\n")
-  cat(sprintf("  Created:       %s\n", format(meta$created_timestamp, "%Y-%m-%d %H:%M:%S")))
+  cat(sprintf("  Created:       %s\n", .mg_fmt_ts(meta$created_timestamp)))
   cat(sprintf("  Created By:    %s\n", meta$created_by))
   cat(sprintf("  Package Ver:   %s\n", meta$package_version))
   cat("\n")
@@ -1606,10 +1651,11 @@ print.motion_trace <- function(x, ...){
   }
 
   if(!is.null(qual) && !is.null(qual$initiate)){
-    if(qual$initiate$qc_pass){
+    latest_initiate <- qual$initiate[[length(qual$initiate)]]
+    if(latest_initiate$qc_pass){
       cat("└─ QC:      ✓ Pass\n")
     } else {
-      n_issues <- length(qual$initiate$issues)
+      n_issues <- length(latest_initiate$issues)
       cat(sprintf("└─ QC:      ✗ %d issue%s detected\n",
                   n_issues, if(n_issues > 1) "s" else ""))
     }
@@ -1624,8 +1670,28 @@ print.motion_trace <- function(x, ...){
 
 #' Initiate a Motion Grammar Session
 #'
-#' @param source Character; data source ('auto', 'strava', 'catapult_replay',
-#'   'guess_csv', 'manual_csv', 'gpx', 'template_csv', 'generic')
+#' @param source Character; data source. One of:
+#'   \describe{
+#'     \item{\code{'auto'}}{Infer source from file extension (\code{.csv} →
+#'       \code{guess_csv}, \code{.gpx} → \code{gpx}).}
+#'     \item{\code{'guess_csv'}}{\strong{Exploration only.} Fuzzy column
+#'       detection — convenient for inspecting an unfamiliar file, but the
+#'       resolved schema can change if column names or file layout change.
+#'       Use \code{\link{guess_csv_template}()} to capture the detected schema
+#'       and then switch to \code{'template_csv'} for reproducible pipelines.}
+#'     \item{\code{'template_csv'}}{\strong{Reproducible / production.} Parses
+#'       according to an explicit \code{\link{csv_template}} specification.
+#'       Column mapping is locked and guaranteed to be identical across
+#'       systems and time. Preferred for any analysis that will be reported
+#'       or shared.}
+#'     \item{\code{'manual_csv'}}{Specify column names via \code{...} args;
+#'       intermediate between guessing and a saved template.}
+#'     \item{\code{'strava'}}{Strava activity (requires auth).}
+#'     \item{\code{'catapult_replay'}}{Catapult CSV replay export.}
+#'     \item{\code{'gpx'}}{Standard GPX track file.}
+#'     \item{\code{'generic'}}{Any JSON REST API via an
+#'       \code{\link{api_stream_template}}.}
+#'   }
 #' @param session Character; Strava ID/URL or file path
 #' @param coord_system Character; 'gps' or 'local'
 #' @param verbose Logical; print summary
@@ -2298,6 +2364,86 @@ load_csv_template <- function(path) {
     ),
     class = "csv_template"
   )
+}
+
+#' Guess a CSV Template from an Example File
+#'
+#' Runs the same column-detection logic as \code{source = 'guess_csv'} in
+#' \code{\link{initiate}()} and converts the detected schema into a locked
+#' \code{\link{csv_template}} object.
+#'
+#' \strong{Recommended workflow:}
+#' \enumerate{
+#'   \item Call \code{guess_csv_template(path, save_path = "my_device.xml")}
+#'     once on a representative file to capture the resolved column mapping.
+#'   \item Inspect the returned template and adjust with
+#'     \code{\link{csv_template}()} if any columns were mis-detected.
+#'   \item Load the saved template in all subsequent scripts with
+#'     \code{initiate(template = "my_device.xml")} — column parsing is then
+#'     explicit, deterministic, and independent of column-name heuristics.
+#' }
+#'
+#' @param path Character; path to an example CSV file to inspect.
+#' @param save_path Character or \code{NULL}; if supplied the template is
+#'   saved to this path via \code{\link{save_csv_template}()}.
+#' @param coord_system Character; \code{"auto"} (default), \code{"gps"}, or
+#'   \code{"local"}.  Passed to the underlying guesser.
+#'
+#' @return A \code{csv_template} object.  Returned invisibly when
+#'   \code{save_path} is supplied, visibly otherwise.
+#' @seealso \code{\link{csv_template}}, \code{\link{save_csv_template}},
+#'   \code{\link{load_csv_template}}, \code{\link{initiate}}
+#' @export
+guess_csv_template <- function(path, save_path = NULL, coord_system = "auto") {
+  if (!file.exists(path))
+    stop("guess_csv_template(): file not found: ", path)
+
+  coord_system <- match.arg(coord_system, c("auto", "gps", "local"))
+
+  trace <- initiate_guess_csv(path, source = coord_system)
+
+  mapping <- attr(trace, "column_mapping")
+  skip_n  <- attr(trace, "skip") %||% 0L
+  cs      <- attr(trace, "coord_system_detected") %||% "gps"
+
+  col_unix <- mapping$unix_time
+  if (is.null(col_unix))
+    stop("guess_csv_template(): could not detect a unix_time column — ",
+         "specify column names manually with csv_template()")
+
+  if (cs == "gps") {
+    if (is.null(mapping$lat) || is.null(mapping$lng))
+      stop("guess_csv_template(): could not detect lat/lng columns — ",
+           "specify column names manually with csv_template()")
+    tmpl <- csv_template(
+      coord_system = "gps",
+      col_unix     = col_unix,
+      col_lat      = mapping$lat,
+      col_lng      = mapping$lng,
+      col_altitude = mapping$altitude,
+      skip         = skip_n
+    )
+  } else {
+    if (is.null(mapping$x) || is.null(mapping$y))
+      stop("guess_csv_template(): could not detect x/y columns — ",
+           "specify column names manually with csv_template()")
+    tmpl <- csv_template(
+      coord_system = "local",
+      col_unix     = col_unix,
+      col_x        = mapping$x,
+      col_y        = mapping$y,
+      col_z        = mapping$z,
+      skip         = skip_n
+    )
+  }
+
+  if (!is.null(save_path)) {
+    save_csv_template(tmpl, save_path)
+    message("Template saved to: ", save_path)
+    return(invisible(tmpl))
+  }
+
+  tmpl
 }
 
 # ── Internal CSV reader ────────────────────────────────────────────────────────

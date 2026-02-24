@@ -14,8 +14,28 @@ initiate(
 )
 }
 \arguments{
-\item{source}{Character; data source ('auto', 'strava', 'catapult_replay',
-'guess_csv', 'manual_csv', 'gpx', 'template_csv', 'generic')}
+\item{source}{Character; data source. One of:
+\describe{
+\item{\code{'auto'}}{Infer source from file extension (\code{.csv} →
+\code{guess_csv}, \code{.gpx} → \code{gpx}).}
+\item{\code{'guess_csv'}}{\strong{Exploration only.} Fuzzy column
+detection — convenient for inspecting an unfamiliar file, but the
+resolved schema can change if column names or file layout change.
+Use \code{\link{guess_csv_template}()} to capture the detected schema
+and then switch to \code{'template_csv'} for reproducible pipelines.}
+\item{\code{'template_csv'}}{\strong{Reproducible / production.} Parses
+according to an explicit \code{\link{csv_template}} specification.
+Column mapping is locked and guaranteed to be identical across
+systems and time. Preferred for any analysis that will be reported
+or shared.}
+\item{\code{'manual_csv'}}{Specify column names via \code{...} args;
+intermediate between guessing and a saved template.}
+\item{\code{'strava'}}{Strava activity (requires auth).}
+\item{\code{'catapult_replay'}}{Catapult CSV replay export.}
+\item{\code{'gpx'}}{Standard GPX track file.}
+\item{\code{'generic'}}{Any JSON REST API via an
+\code{\link{api_stream_template}}.}
+}}
 
 \item{session}{Character; Strava ID/URL or file path}
 

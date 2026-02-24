@@ -1,37 +1,3 @@
-# segment name: mg_helpers ---
-
-#' Get the installed motiongrammar package version
-#'
-#' Uses utils::packageName() so the exact installed name is always used.
-#' Falls back to "dev" when the package is loaded in development mode or
-#' the version cannot be determined.
-#' @keywords internal
-.mg_pkg_version <- function() {
-  tryCatch({
-    pkg <- utils::packageName()
-    if (is.null(pkg) || !nzchar(pkg)) return("dev")
-    as.character(utils::packageVersion(pkg))
-  }, error = function(e) "dev")
-}
-
-#' Generate a unique step identifier for quality log entries
-#'
-#' Uses uuid::UUIDgenerate() when available; falls back to a timestamp-based
-#' string if the uuid package is not installed.
-#' @keywords internal
-.mg_step_id <- function() {
-  tryCatch(
-    uuid::UUIDgenerate(),
-    error = function(e) paste0("step-", format(Sys.time(), "%Y%m%d%H%M%OS3"))
-  )
-}
-
-#' Return current time as a UTC ISO 8601 string
-#' @keywords internal
-.mg_timestamp <- function() {
-  format(as.POSIXct(Sys.time(), tz = "UTC"), "%Y-%m-%dT%H:%M:%OS3Z")
-}
-
 # segment name: filt_sma ---
 
 #' Simple Moving Average filter
@@ -307,12 +273,37 @@ filtrate <- function(.data,
   rows_before <- nrow(.data)
   output <- .data
   input_cols_used <- stats::setNames(character(length(target_cols)), target_cols)
+  chained_cols <- character(0)
   for (col in target_cols) {
     f_col <- paste0('f_', col)
     source_col <- if (f_col %in% names(output) && sum(!is.na(output[[f_col]])) >= 4) f_col else col
+    if (source_col == f_col) chained_cols <- c(chained_cols, f_col)
     input_cols_used[[col]] <- source_col
+
+    n_source_na <- sum(is.na(output[[source_col]]))
     output[[f_col]] <- do.call(safe_filter,
       c(list(vals = output[[source_col]], filter_fn = filter_fn), filter_args))
+    n_filtered_na <- sum(is.na(output[[f_col]]))
+
+    # Two-sided filters (SMA, Savitzky-Golay) cannot smooth the first and last
+    # floor(window/2) rows and leave them as NA. Warn so users aren't surprised.
+    if (method %in% c('sma', 'savgol') && n_filtered_na > n_source_na) {
+      message(sprintf(
+        "filtrate(): '%s' introduced %d edge NA(s) in '%s' — the first/last %d row(s) of each valid run cannot be smoothed over their neighbours.",
+        method, n_filtered_na - n_source_na, f_col,
+        floor((if (method == 'sma') window else window) / 2L)
+      ))
+    }
+  }
+
+  # Warn once if this call is chaining on previously-filtered columns
+  if (length(chained_cols) > 0) {
+    warning(sprintf(
+      "filtrate(): chaining a second filter pass on already-filtered column(s): %s. ",
+      paste(chained_cols, collapse = ", ")
+    ), "Each call filters the output of the previous pass. Verify this is intentional — ",
+    "repeated filtering attenuates the signal further and may distort derivatives.",
+    call. = FALSE)
   }
 
   # For coordinates target: ensure f_z exists even when z is absent

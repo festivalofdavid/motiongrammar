@@ -41,7 +41,10 @@ allocate <- function(
   .apply_bands <- function(x, thresholds) {
     labels <- paste0('band_', seq_len(length(thresholds) - 1))
     idx <- findInterval(x, thresholds)
-    idx[idx == 0 | idx > length(labels)] <- NA_integer_
+    # Values below the lowest threshold are invalid (e.g. negative velocity) → NA
+    idx[idx == 0] <- NA_integer_
+    # Values above the highest threshold belong to the top band (open-ended upper bound)
+    idx[!is.na(idx) & idx > length(labels)] <- length(labels)
     factor(labels[idx], levels = labels, ordered = TRUE)
   }
 
@@ -93,7 +96,7 @@ allocate <- function(
       fn = 'findInterval',
       package = 'base',
       output_type = 'ordered factor',
-      out_of_range = 'NA (values outside band range are not assigned)',
+      out_of_range = 'values below minimum threshold → NA; values above maximum threshold → top band (open-ended upper bound)',
       abs_applied = 'acceleration, angular_velocity (absolute value taken before banding)'
     )
   )
@@ -154,7 +157,9 @@ allocate_csv <- function(.data, file) {
     for (deriv in unique(p_rows$target_derivative)) {
       d_rows <- p_rows[p_rows$target_derivative == deriv, ]
       d_rows <- d_rows[order(d_rows$profile_start), ]
-      allocation[[deriv]] <- d_rows$profile_start
+      # Include the final band's upper boundary so all N bands are created.
+      # Without it, findInterval() sees N-1 intervals and the top band is lost.
+      allocation[[deriv]] <- c(d_rows$profile_start, tail(d_rows$profile_end, 1))
     }
 
     .data <- allocate(

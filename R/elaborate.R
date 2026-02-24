@@ -85,17 +85,17 @@ elaborate <- function(.data, ..., by = NULL, log_expr = FALSE) {
   # Restore class
   class(out) <- c('motion_trace', setdiff(class(out), 'motion_trace'))
 
-  # Quality log — accumulate calls so multiple elaborate() steps are all visible
+  # Quality log — each call to elaborate() appends one entry to qual$elaborate,
+  # consistent with the flat-list pattern used by all other pipeline steps.
   if (is.null(qual)) qual <- list()
-  if (is.null(qual$elaborate)) qual$elaborate <- list(calls = list())
 
   dplyr_version <- tryCatch(
     as.character(utils::packageVersion('dplyr')),
     error = function(e) 'unknown'
   )
 
-  n <- length(qual$elaborate$calls) + 1L
-  qual$elaborate$calls[[as.character(n)]] <- list(
+  entry <- list(
+    step            = 'elaborate',
     step_id         = .mg_step_id(),
     package_version = .mg_pkg_version(),
     timestamp       = .mg_timestamp(),
@@ -113,6 +113,8 @@ elaborate <- function(.data, ..., by = NULL, log_expr = FALSE) {
     },
     dependencies    = list(dplyr = dplyr_version)
   )
+
+  qual$elaborate <- append(qual$elaborate, list(entry))
 
   attr(out, 'quality') <- qual
 

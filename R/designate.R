@@ -119,6 +119,13 @@ designate <- function(.data,
   # 6. Map designations back to the full trace (preserving all rows)
   .data$designation <- NA_character_
   .data$designation[sub$.orig_row] <- sub$designation
+
+  # Rows with NA velocity (interpolated gaps, leading/trailing rows) have no
+  # PELT designation. Propagate the nearest valid designation to fill them so
+  # downstream quantitate() doesn't silently drop those rows.
+  .data$designation <- zoo::na.locf(.data$designation, na.rm = FALSE)
+  .data$designation <- zoo::na.locf(.data$designation, na.rm = FALSE, fromLast = TRUE)
+
   refined <- .data
   } else if (method == 'manual') {
 
@@ -161,7 +168,7 @@ designate <- function(.data,
   qual <- attr(refined, 'quality')
   if (is.null(qual)) qual <- list()
 
-  qual$designate <- list(
+  entry <- list(
     step            = 'designate',
     step_id         = .mg_step_id(),
     package_version = .mg_pkg_version(),
@@ -196,6 +203,7 @@ designate <- function(.data,
     segment_counts = desig_counts
   )
 
+  qual$designate <- append(qual$designate, list(entry))
   attr(refined, 'quality') <- qual
 
   # ── Metadata ───────────────────────────────────────────────────────────────

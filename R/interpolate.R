@@ -118,7 +118,7 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
     }
   }
 
-  qual$interpolate <- list(
+  entry <- list(
     step            = "interpolate",
     step_id         = .mg_step_id(),
     package_version = .mg_pkg_version(),
@@ -180,6 +180,7 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
     dependencies = setNames(dep_versions, interp_deps)
   )
 
+  qual$interpolate <- append(qual$interpolate, list(entry))
   attr(output, 'quality') <- qual
 
   # ---- Update metadata ----
@@ -255,11 +256,15 @@ interpolate <- function(.data,
   interp_coord_cols <- c('x', 'y', 'z', 'unix_time', 'unix_time_orig', 'is_interpolated')
   passthrough_cols  <- setdiff(names(output), interp_coord_cols)
 
-  # this is our dense grid-- so gapless
+  # this is our dense grid-- so gapless.
+  # Round the seq() output to the same hz-grid precision as the input timestamps
+  # to prevent IEEE 754 drift causing join misses (e.g. 0.1 + 0.1 ≠ 0.2 exactly).
   full_seq <- data.frame(
-    unix_time = seq(min(output$unix_time, na.rm = TRUE),
-                    max(output$unix_time, na.rm = TRUE),
-                    by = interval)
+    unix_time = round(
+      seq(min(output$unix_time, na.rm = TRUE),
+          max(output$unix_time, na.rm = TRUE),
+          by = interval) * hz
+    ) / hz
   )
   n_grid_rows <- nrow(full_seq)
 

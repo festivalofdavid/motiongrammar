@@ -22,7 +22,7 @@ returns duration per designation segment (or whole session).}
 when \code{allocation = NULL}.}
 
 \item{scope}{Character; \code{'designation'}, \code{'session'}, or
-\code{'active_session'}. See \code{\link{quantitate}}.}
+\code{'active'}. See \code{\link{quantitate}}.}
 
 \item{active_only}{Logical; passed to \code{\link{quantitate}} when
 \code{scope = 'designation'}.}

@@ -29,10 +29,12 @@ by. Any combination of \code{'velocity'}, \code{'acceleration'},
 \item{\code{'designation'}}{(default) Groups by \code{designation} and
 bands. Use \code{active_only} to optionally restrict to active
 segments.}
-\item{\code{'session'}}{Groups by bands only, across the whole session.
-Restricts to active designations (excludes relief).}
-\item{\code{'active_session'}}{Groups by bands only, across the whole
-session. Includes all rows (active and relief).}
+\item{\code{'session'}}{Groups by bands only across the whole session
+(active and relief rows included). Use this to get overall session
+totals per band.}
+\item{\code{'active'}}{Groups by bands only, restricting to rows whose
+\code{designation} starts with \code{'active_'}. Relief periods are
+excluded.}
 }}
 
 \item{active_only}{Logical; when \code{scope = 'designation'}, restricts
@@ -44,7 +46,12 @@ Ignored for other scopes. Defaults to \code{FALSE}.}
 \value{
 A summarised tibble. Grouping columns are \code{designation} (when
 \code{scope = 'designation'}) and/or the resolved band columns (when
-\code{allocation} is provided).
+\code{allocation} is provided). The full pipeline quality log is attached
+as \code{attr(result, 'quality')} so the output is self-describing.
+\strong{Note:} R attributes are not preserved by CSV export
+(\code{write.csv}, \code{readr::write_csv}, etc.). Save as RDS
+(\code{saveRDS}) or call \code{attr(result, 'quality')} before writing
+to preserve provenance.
 }
 \description{
 Aggregates motion data by designation and one or more intensity

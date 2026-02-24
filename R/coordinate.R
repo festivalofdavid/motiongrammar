@@ -333,7 +333,7 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
   # Retrieve rotation angle from metadata if rotation was applied
   theta <- attr(output, 'metadata')$rotation_angle
 
-  qual$coordinate <- list(
+  entry <- list(
     step            = "coordinate",
     step_id         = .mg_step_id(),
     package_version = .mg_pkg_version(),
@@ -391,6 +391,7 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
     dependencies = setNames(dep_versions, coord_deps)
   )
 
+  qual$coordinate <- append(qual$coordinate, list(entry))
   attr(output, 'quality') <- qual
   output
 }

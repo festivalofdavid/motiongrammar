@@ -18,10 +18,12 @@
 #'     \item{\code{'designation'}}{(default) Groups by \code{designation} and
 #'       bands. Use \code{active_only} to optionally restrict to active
 #'       segments.}
-#'     \item{\code{'session'}}{Groups by bands only, across the whole session.
-#'       Restricts to active designations (excludes relief).}
-#'     \item{\code{'active_session'}}{Groups by bands only, across the whole
-#'       session. Includes all rows (active and relief).}
+#'     \item{\code{'session'}}{Groups by bands only across the whole session
+#'       (active and relief rows included). Use this to get overall session
+#'       totals per band.}
+#'     \item{\code{'active'}}{Groups by bands only, restricting to rows whose
+#'       \code{designation} starts with \code{'active_'}. Relief periods are
+#'       excluded.}
 #'   }
 #' @param active_only Logical; when \code{scope = 'designation'}, restricts
 #'   rows to segments whose \code{designation} starts with \code{'active_'}.
@@ -29,7 +31,12 @@
 #' @param ... Summarise expressions passed to \code{dplyr::summarise()}.
 #' @return A summarised tibble. Grouping columns are \code{designation} (when
 #'   \code{scope = 'designation'}) and/or the resolved band columns (when
-#'   \code{allocation} is provided).
+#'   \code{allocation} is provided). The full pipeline quality log is attached
+#'   as \code{attr(result, 'quality')} so the output is self-describing.
+#'   \strong{Note:} R attributes are not preserved by CSV export
+#'   (\code{write.csv}, \code{readr::write_csv}, etc.). Save as RDS
+#'   (\code{saveRDS}) or call \code{attr(result, 'quality')} before writing
+#'   to preserve provenance.
 #' @export
 quantitate <- function(
   .data,
@@ -43,7 +50,7 @@ quantitate <- function(
   validate_motion_trace(.data, 'quantitate')
   cols_before <- names(.data)
   rows_before <- nrow(.data)
-  scope <- match.arg(scope, c('designation', 'session', 'active_session'))
+  scope <- match.arg(scope, c('designation', 'session', 'active'))
 
   suffix_map <- c(
     velocity = 'velocity_band',
@@ -79,7 +86,7 @@ quantitate <- function(
   existing_groups <- dplyr::group_vars(.data)
 
   # Row filtering
-  if (scope == 'session' || (scope == 'designation' && active_only)) {
+  if (scope == 'active' || (scope == 'designation' && active_only)) {
     .data <- dplyr::filter(.data, grepl('^active_', designation))
   }
 
@@ -95,7 +102,11 @@ quantitate <- function(
     dplyr::group_by(dplyr::across(dplyr::all_of(group_vars))) |>
     dplyr::summarise(..., .groups = 'drop')
 
-  attr(result, 'quantitate_log') <- list(
+  qual <- attr(.data, 'quality')
+  if (is.null(qual)) qual <- list()
+
+  entry <- list(
+    step            = 'quantitate',
     step_id         = .mg_step_id(),
     package_version = .mg_pkg_version(),
     timestamp       = .mg_timestamp(),
@@ -116,6 +127,12 @@ quantitate <- function(
     )
   )
 
+  qual$quantitate <- append(qual$quantitate, list(entry))
+  # Copy the full quality log (including this entry) onto the result so the
+  # summarised tibble is self-describing — attr(result, 'quality') gives the
+  # complete pipeline provenance up to and including the quantitate step.
+  attr(result, 'quality') <- qual
+
   result
 }
 
@@ -131,7 +148,7 @@ quantitate <- function(
 #' @param derivative Character; one or more derivatives to group by. Ignored
 #'   when \code{allocation = NULL}.
 #' @param scope Character; \code{'designation'}, \code{'session'}, or
-#'   \code{'active_session'}. See \code{\link{quantitate}}.
+#'   \code{'active'}. See \code{\link{quantitate}}.
 #' @param active_only Logical; passed to \code{\link{quantitate}} when
 #'   \code{scope = 'designation'}.
 #' @return A summarised tibble with a \code{duration_sec} column.

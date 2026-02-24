@@ -257,7 +257,7 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
     output_cols
   )
 
-  qual$derivate <- list(
+  entry <- list(
     step            = 'derivate',
     step_id         = .mg_step_id(),
     package_version = .mg_pkg_version(),
@@ -282,6 +282,7 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
     issues = issues
   )
 
+  qual$derivate <- append(qual$derivate, list(entry))
   attr(out, 'quality') <- qual
 
   # ── Metadata ───────────────────────────────────────────────────────────────
