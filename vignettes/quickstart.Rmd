@@ -437,7 +437,7 @@ session_totals
 
 ------------------------------------------------------------------------
 
-## Appendix -  Inspect the quality log
+## Appendix - Inspect the quality log
 
 Let's take a look at the quality log I outlined earlier now that we are
 at the end. Notice how it preserved everything we did to the trace?

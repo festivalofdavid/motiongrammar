@@ -38,10 +38,10 @@ trace_pre <- initiate(
   filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5)
 ```
 
-`derivate()` computes time-series derivatives of a projected and filtered
-motion trace. It always produces `distance` and `heading`, and adds
-whichever of velocity, acceleration, angular velocity, jerk, and lateral
-G you request.
+`derivate()` computes time-series derivatives of a projected and
+filtered motion trace. It always produces `distance` and `heading`, and
+adds whichever of velocity, acceleration, angular velocity, jerk, and
+lateral G you request.
 
 ------------------------------------------------------------------------
 
@@ -73,23 +73,33 @@ summary(trace[, c("velocity", "acceleration", "angular_velocity")])
 
 ## 2. Velocity
 
-Velocity is Euclidean displacement divided by elapsed time over the
-preceding window:
+Velocity measures how fast a player is going, without accounting for
+things like change of direction etc. Scientifically, velocity and speed
+(and distance/displacement) are not interchangeable. However, velocity
+is colloquially the most common term used in sport to describe "how
+fast" a player is running, and is therefore what I use here.
 
-```
+*motiongrammar* computes velocity using the formula below.
+
+```         
 velocity = sqrt((x[i] - x[i-w])² + (y[i] - y[i-w])²) / (t[i] - t[i-w])
 ```
+
+When we look at our velocity visuals below, we are asking *how fast is a
+player, over time*? Higher time points (like our erroneous spike at the
+end) denote faster time points. Whereas points closer to 0, mean a
+player is closer to being stationary.
 
 ```{r velocity-ts}
 # Plot velocity time-series (only the GPS period)
 trace |>
   filter(!is.na(f_x)) |>
   ggplot(aes(x = unix_time, y = velocity)) +
-  geom_line(linewidth = 0.3, colour = "steelblue") +
+  geom_line(linewidth = 0.5, colour = "black") +
   labs(
     title = "Velocity over time",
     x     = "Unix time (s)",
-    y     = "Speed (m/s)"
+    y     = "Velocity (m/s)"
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank())
@@ -98,6 +108,19 @@ trace |>
 ------------------------------------------------------------------------
 
 ## 3. Acceleration
+
+Acceleration measures how quickly a player *speeds up* or *slows down*.
+From a motion perspective, we consider acceleration as a single
+time-series. Positive values mean a player is getting faster (ie., their
+current velocity is higher than their previous velocity). Negative
+values mean a player is decelerating (ie., their current velocity is
+lower than their previous velocity).
+
+Please note, that acceleration is notoriously noisy in **any setting**.
+This is especially true using relatively low fidelity GPS data (as
+opposed to an optical system like Hawkeye). My advice is to tread
+carefully when analysing acceleration. It's common in the field and many
+practitioners do it, but you are dealing with a lot more noise here.
 
 ```{r acceleration-ts}
 trace |>
@@ -114,22 +137,14 @@ trace |>
   theme(panel.grid = element_blank())
 ```
 
-Typical ranges in field sport:
+## 4. Angular velocity
 
-| Context              | Range            |
-|----------------------|------------------|
-| Normal running       | −3 to +3 m/s²    |
-| High-intensity burst | ±4 to ±6 m/s²    |
-| Artefact (noise)     | > ±10 m/s²       |
+We use angular velocity to get a time-series of "change of direction".
+Both velocity and acceleration measure how fast a player moves. Angular
+velocity, on the other hand, is derived from heading using a finite
+difference with circular wrapping to handle the 360° → 0° boundary:
 
-------------------------------------------------------------------------
-
-## 4. Angular velocity — measuring curvature
-
-Angular velocity is derived from heading using a finite difference with
-circular wrapping to handle the 360° → 0° boundary:
-
-```
+```         
 Δh = ((heading[i] - heading[i-w] + 180) %% 360) - 180
 angular_velocity = |Δh| / dt
 ```
@@ -196,8 +211,16 @@ trace |>
 
 ## 6. The `window` argument
 
-The window controls how many frames span each finite difference. Larger
-windows average over more time (less noise, less temporal resolution).
+We do not usually calculate *truly instantaneous* velocity, acceleration
+and angular velocity. Instead, we usually look within *a window*. This
+adds an additional check/balance to single data points where a players
+acceleration or velocity may unexpectedly spike even after filtering.
+
+The window argument controls how many frames span each finite
+difference. Larger windows average over more time (less noise, less
+temporal resolution). We can set the window globally (for example window
+= 5), or supply different windows for velocity, acceleration and
+angular_velocity specifically.
 
 ```{r window, eval=FALSE}
 # Uniform window: 5 frames at 10 Hz = 0.5 s differences
@@ -214,9 +237,6 @@ trace <- trace_pre |>
   )
 ```
 
-The default window equals the sample rate in Hz (10 frames at 10 Hz = 1-second differences),
-making the default consistent across different device sample rates.
-
 ------------------------------------------------------------------------
 
 ## 7. `use_filtered` and `speed_floor`
@@ -229,6 +249,10 @@ trace <- trace_pre |> derivate(use_filtered = FALSE)
 trace <- trace_pre |> derivate(speed_floor = 0.2)
 ```
 
+use-filtered tells R whether you want to use filtered data from a
+previous step, or raw data. If you are working with already filtered
+data from a provider, it makes sense the set use_filtered as FALSE.
+
 Below `speed_floor`, `heading` and `angular_velocity` are suppressed to
 avoid noise in direction measurements when the player is stationary.
 
@@ -236,14 +260,16 @@ avoid noise in direction measurements when the player is stationary.
 
 ## 8. Signed angular velocity
 
+Signed omega allows us to determine the direction a player turns/changes
+direction. I'm sure there is someone really smart out there who could
+use this to identify asymmetries in load using this, so I included it
+here.
+
 ```{r signed-omega, eval=FALSE}
 # Retain sign: positive = left / counter-clockwise
 trace <- trace_pre |>
   derivate(derivatives = "angular_velocity", signed_omega = TRUE)
 ```
-
-Useful for quantifying movement asymmetry — e.g. more left turns than
-right in a particular drill pattern.
 
 ------------------------------------------------------------------------
 
@@ -261,8 +287,7 @@ trace <- trace_pre |>
 
 Both print a warning. Jerk and lateral G amplify GPS positional noise
 significantly and have limited validation in the sports science
-literature. Apply aggressive coordinate filtering (cutoff ≤ 1 Hz) if
-you need them.
+literature. I would not use these.
 
 ------------------------------------------------------------------------
 
@@ -281,10 +306,10 @@ derivative — copy these into a methods section for a publication.
 
 ## Quick reference
 
-| Argument       | Default     | Purpose                                                      |
-|----------------|-------------|--------------------------------------------------------------|
-| `use_filtered` | `TRUE`      | Use `f_x`/`f_y` if available; fall back to raw with message  |
-| `derivatives`  | standard set | `"velocity"`, `"acceleration"`, `"angular_velocity"`, `"jerk"`, `"lateral_g"`, or `"all"` |
-| `window`       | sample rate Hz | Frames per finite difference; scalar or named list         |
-| `speed_floor`  | `0.5`       | m/s below which heading / angular velocity are suppressed    |
-| `signed_omega` | `FALSE`     | Retain sign in angular velocity (+ = CCW, − = CW)           |
+| Argument | Default | Purpose |
+|--------------|--------------|--------------------------------------------|
+| `use_filtered` | `TRUE` | Use `f_x`/`f_y` if available; fall back to raw with message |
+| `derivatives` | standard set | `"velocity"`, `"acceleration"`, `"angular_velocity"`, `"jerk"`, `"lateral_g"`, or `"all"` |
+| `window` | sample rate Hz | Frames per finite difference; scalar or named list |
+| `speed_floor` | `0.5` | m/s below which heading / angular velocity are suppressed |
+| `signed_omega` | `FALSE` | Retain sign in angular velocity (+ = CCW, − = CW) |

@@ -47,9 +47,10 @@ trace <- initiate(
 ```
 
 `quantitate()` collapses a frame-by-frame `motion_trace` into a tidy
-summary table grouped by designation segment, intensity band, or both.
+summary table grouped by designation segment (or session), intensity band, or both.
 You define what to compute — distance, time, peak velocity — and it
-groups and summarises accordingly.
+groups and summarises accordingly. This is motiongrammar's take on summarise, but has the advantage of
+preserving the quality and meta objects.
 
 ------------------------------------------------------------------------
 
@@ -134,7 +135,6 @@ active_totals
 ```
 
 ------------------------------------------------------------------------
-
 ## 2. Visualising the summary
 
 ### Distance by velocity band
@@ -173,25 +173,6 @@ session_totals |>
   theme(panel.grid = element_blank())
 ```
 
-### Designation × band heatmap
-
-```{r plot-heatmap, fig.height=3}
-summary_by_segment |>
-  filter(!is.na(gps_standard_velocity_band)) |>
-  ggplot(aes(x = gps_standard_velocity_band, y = designation,
-             fill = dist_m)) +
-  geom_tile(colour = "white", linewidth = 0.5) +
-  scale_fill_viridis_c(option = "plasma", begin = 0.1, end = 0.9) +
-  labs(
-    title  = "Distance (m) by segment and velocity band",
-    x      = "Velocity band",
-    y      = "Designation",
-    fill   = "Dist (m)"
-  ) +
-  theme_minimal() +
-  theme(panel.grid = element_blank())
-```
-
 ------------------------------------------------------------------------
 
 ## 3. Summarising without intensity bands
@@ -212,53 +193,7 @@ segment_totals
 
 ------------------------------------------------------------------------
 
-## 4. `band_duration()` — convenience wrapper
-
-```{r band-duration}
-duration_tbl <- band_duration(
-  trace,
-  allocation  = "gps_standard",
-  derivative  = "velocity",
-  scope       = "designation",
-  active_only = TRUE
-)
-
-duration_tbl
-```
-
-```{r plot-duration}
-duration_tbl |>
-  filter(!is.na(gps_standard_velocity_band)) |>
-  ggplot(aes(x = gps_standard_velocity_band, y = duration_sec,
-             fill = gps_standard_velocity_band)) +
-  geom_col(show.legend = FALSE) +
-  scale_fill_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
-  labs(
-    title = "Duration in each velocity band (active segments only)",
-    x     = "Velocity band", y = "Duration (s)"
-  ) +
-  theme_minimal() +
-  theme(panel.grid = element_blank())
-```
-
-------------------------------------------------------------------------
-
-## 5. Saving results
-
-```{r save, eval=FALSE}
-# Preserves the full quality log
-saveRDS(summary_by_segment, "~/outputs/session_summary.rds")
-
-# CSV — attributes are dropped (expected)
-readr::write_csv(summary_by_segment, "~/outputs/session_summary.csv")
-
-# Save quality log separately if needed alongside CSV
-saveRDS(attr(summary_by_segment, "quality"), "~/outputs/session_quality.rds")
-```
-
-------------------------------------------------------------------------
-
-## 6. Reading the quality log
+## 4. Reading the quality log
 
 ```{r quality}
 qual <- attr(summary_by_segment, "quality")

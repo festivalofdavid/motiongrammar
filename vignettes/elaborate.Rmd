@@ -107,7 +107,7 @@ trace <- trace_pre |>
 
 ### Curved load on the field trajectory
 
-```{r curved-load-field, fig.height=5}
+```{r curved-load-field-basic, fig.height=5}
 trace <- trace_pre |>
   elaborate(curved_load = velocity * abs(angular_velocity))
 
@@ -197,28 +197,63 @@ attr(trace, "quality")$elaborate[[1]]$expressions
 
 ------------------------------------------------------------------------
 
-## 6. Practical examples
+## 6. Case study — smoothed acceleration and curved load
 
-```{r examples}
+Raw acceleration signals from GPS tracking contain frame-to-frame noise
+that can inflate summary metrics. A common practitioner step is to apply
+a **simple moving average (SMA)** before computing composite metrics like
+curved load. `elaborate()` makes it straightforward to chain both
+operations in one call.
+
+```{r sma-curved-load}
+library(zoo)
+
 trace <- trace_pre |>
   elaborate(
-    # Intensity flags
-    is_hsr    = velocity >= 5.5,
-    is_sprint = velocity >= 7.0,
-    # Composite metrics
-    curved_load  = velocity * abs(angular_velocity),
-    power_proxy  = velocity * pmax(acceleration, 0),   # positive work only
-    # Unit conversion
-    speed_kmh = velocity * 3.6
+    # 10-frame (~1 s at 10 Hz) simple moving average of acceleration
+    accel_sma = zoo::rollmean(acceleration, k = 10, fill = NA, align = "center"),
+    # Curved load built from the smoothed signal
+    curved_load = accel_sma * abs(angular_velocity)
   )
 
-# Proportion of active period in HSR
+summary(trace$accel_sma)
+summary(trace$curved_load)
+```
+
+### Raw vs smoothed acceleration
+
+```{r sma-comparison-plot}
 trace |>
-  filter(designation == "active_1") |>
-  summarise(
-    pct_hsr    = round(mean(is_hsr,    na.rm = TRUE) * 100, 1),
-    pct_sprint = round(mean(is_sprint, na.rm = TRUE) * 100, 1)
-  )
+  filter(!is.na(accel_sma)) |>
+  ggplot(aes(x = unix_time)) +
+  geom_line(aes(y = acceleration), linewidth = 0.25, colour = "grey70",
+            alpha = 0.8) +
+  geom_line(aes(y = accel_sma), linewidth = 0.7, colour = "steelblue") +
+  labs(
+    title    = "Raw vs 10-frame SMA acceleration",
+    subtitle = "Grey = raw  |  Blue = SMA (k = 10)",
+    x = "Unix time (s)", y = "Acceleration (m/s²)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+### Curved load trajectory
+
+```{r curved-load-field, fig.height=5}
+trace |>
+  filter(!is.na(f_x), curved_load < quantile(curved_load, 0.99, na.rm = TRUE)) |>
+  ggplot(aes(x = f_x, y = f_y, colour = curved_load)) +
+  geom_path(linewidth = 1.3) +
+  coord_fixed() +
+  scale_colour_viridis_c(option = "magma", begin = 0.1, end = 0.95) +
+  labs(
+    title    = "Curved load — SMA acceleration × |angular velocity|",
+    subtitle = "Bright = high combined acceleration and turning demand",
+    x = "x (m)", y = "y (m)", colour = "Curved\nload"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
 ```
 
 ------------------------------------------------------------------------

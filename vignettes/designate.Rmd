@@ -39,17 +39,27 @@ trace_pre <- initiate(
 ```
 
 `designate()` partitions a continuous motion trace into labelled
-episodes — active bouts of movement and relief periods — so that
-`quantitate()` can summarise each episode separately.
+"sections", active bouts of movement, drills or game intervals, and
+relief periods. Quantitate can summarise each section separately.
 
 ------------------------------------------------------------------------
 
-## 1. Why segmentation matters
+## 1. Why we designate
 
 A GPS file for a training session is one long continuous time-series.
 Aggregating the whole file without segmentation conflates a warm-up,
-multiple drill blocks, and a cool-down into a single number. `designate()`
-adds a `designation` column so each episode gets its own summary row.
+multiple drill blocks, and a cool-down into a single number.
+`designate()` adds a `designation` column so each episode gets its own
+summary row.
+
+Chances are, you have designations (for example drill names) in your
+providers file. That's great! If that's the case, it makes total sense
+to preserve those columns at the *initiate* phase and group by them.
+Designate is built with automatic detection in mind (using a variation
+on my PhD methods), as well as for instances where labels may be stored
+in a separate csv. Drills are the most obvious thing we would designate
+by, but you could also use this to look at any tagged event or context
+from Sportscode.
 
 ------------------------------------------------------------------------
 
@@ -82,9 +92,9 @@ table(trace$designation)
 ```
 
 The example file produces two segments: a long relief period at the
-start (the player was indoors with no GPS) and one active bout once
-they went outside. In a typical multi-drill session you would see
-`active_1`, `relief_1`, `active_2`, `relief_2`, and so on.
+start (the player was indoors with no GPS) and one active bout once they
+went outside. In a typical multi-drill session you would see `active_1`,
+`relief_1`, `active_2`, `relief_2`, and so on.
 
 ### Visualising the segmentation
 
@@ -127,16 +137,17 @@ trace |>
 
 ### How the algorithm works
 
-1. **PELT segmentation.** The velocity signal is scanned for points
-   where the mean changes abruptly (SIC penalty prevents over-segmentation).
-2. **Active vs relief classification.** Segments with mean velocity
-   below `v_threshold` → relief; above → active.
-3. **Short-segment merging.** Segments shorter than `min_pts` rows are
-   absorbed into their neighbour.
-4. **Labelling.** Active segments → `active_1`, `active_2`, etc.;
-   relief → `relief_1`, `relief_2`, etc.
-5. **Gap propagation.** Rows with NA velocity inherit the nearest
-   neighbour's designation.
+1.  **PELT segmentation.** The velocity signal is scanned for points
+    where the mean changes abruptly (SIC penalty prevents
+    over-segmentation).
+2.  **Active vs relief classification.** Segments with mean velocity
+    below `v_threshold` → relief; above → active.
+3.  **Short-segment merging.** Segments shorter than `min_pts` rows are
+    absorbed into their neighbour.
+4.  **Labelling.** Active segments → `active_1`, `active_2`, etc.;
+    relief → `relief_1`, `relief_2`, etc.
+5.  **Gap propagation.** Rows with NA velocity inherit the nearest
+    neighbour's designation.
 
 ### Tuning `v_threshold`
 
@@ -144,26 +155,11 @@ trace |>
 |-----------------------------|-------------------------|
 | Field sport (football, AFL) | 0.25–0.5 m/s            |
 | Road running / cycling      | 1.0–2.0 m/s             |
-| Court sport (basketball)    | 0.25–0.5 m/s            |
+| Court sport (netball)       | 0.25–0.5 m/s            |
 
 ------------------------------------------------------------------------
 
-## 3. Segment duration summary
-
-```{r segment-summary}
-trace |>
-  group_by(designation) |>
-  summarise(
-    n_frames   = n(),
-    duration_s = n() / 10,
-    mean_vel   = round(mean(velocity, na.rm = TRUE), 2),
-    peak_vel   = round(max(velocity, na.rm = TRUE), 2)
-  )
-```
-
-------------------------------------------------------------------------
-
-## 4. Manual segmentation — `method = 'manual'`
+## 3. Manual segmentation — `method = 'manual'`
 
 If you have a timing sheet or video annotation with known start/end
 times, import those labels directly:
@@ -176,9 +172,10 @@ trace <- trace_pre |>
   )
 ```
 
-The CSV must have three columns: `designation`, `unix_start`, `unix_end`.
+The CSV must have three columns: `designation`, `unix_start`,
+`unix_end`.
 
-```csv
+``` csv
 designation,unix_start,unix_end
 warm_up,1521942600,1521942900
 drill_1,1521942960,1521943320
@@ -221,10 +218,10 @@ export_designations(trace, path = "~/outputs/session_designations.csv")
 The exported CSV has exactly the format that `method = 'manual'`
 expects. A useful review loop:
 
-1. Run automatic segmentation.
-2. Export intervals to CSV.
-3. Adjust misclassified boundaries in Excel.
-4. Re-run with `method = 'manual'` using the corrected file.
+1.  Run automatic segmentation.
+2.  Export intervals to CSV.
+3.  Adjust misclassified boundaries in Excel.
+4.  Re-run with `method = 'manual'` using the corrected file.
 
 ------------------------------------------------------------------------
 
@@ -243,10 +240,10 @@ records the source file path and column mapping used.
 
 ## Quick reference
 
-| Argument      | Default     | Purpose                                             |
-|---------------|-------------|-----------------------------------------------------|
-| `method`      | `"corbett"` | `"corbett"` (automatic) or `"manual"` (CSV import)  |
-| `v_threshold` | `0.25`      | m/s — mean below this = relief segment              |
-| `min_pts`     | `5 × hz`    | Minimum rows per segment; tiny segments are merged  |
-| `file`        | `NULL`      | Path to manual-label CSV (required for `"manual"`)  |
-| `cols`        | `NULL`      | Column mapping: `NULL`, `"guess"`, or named vector  |
+| Argument | Default | Purpose |
+|---------------|---------------|------------------------------------------|
+| `method` | `"corbett"` | `"corbett"` (automatic) or `"manual"` (CSV import) |
+| `v_threshold` | `0.25` | m/s — mean below this = relief segment |
+| `min_pts` | `5 × hz` | Minimum rows per segment; tiny segments are merged |
+| `file` | `NULL` | Path to manual-label CSV (required for `"manual"`) |
+| `cols` | `NULL` | Column mapping: `NULL`, `"guess"`, or named vector |
