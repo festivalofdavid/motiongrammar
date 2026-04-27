@@ -1,0 +1,424 @@
+---
+title: "Filtrate: Removing Noise from Tracking Data"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Filtrate: Removing Noise from Tracking Data}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width  = 7,
+  fig.height = 4,
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+```{r pipeline-setup, include=FALSE}
+devtools::load_all()
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Build trace up to interpolation — we demonstrate filtrate() here
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20)
+```
+
+GPS and optical tracking data contain measurement noise — small random
+errors in position that have nothing to do with how the athlete actually
+moved. `filtrate()` removes that noise. But to use it well, you need to
+understand *what noise is*, *what a filter does to it*, and *how to
+choose the right settings*.
+
+Let me start by saying, that filtering and frequency domain analysis is
+a pressure point for most students studying sports science (it certainly
+was for me!) It will likely take time for these concepts to sink in, and
+for your first few attempts doing this, it's normal to feel like you're
+doing some magic without knowing exactly how it works.
+
+------------------------------------------------------------------------
+
+## 1. Introducing Noise
+
+GPS coordinates are not perfect. They have error. This error usually
+appears as rapid "jitters" around a players smoother trajectory. Often,
+we don't even notice noise until we differentiate (calculate velocity
+and acceleration). **Differentiation amplifies high-frequency content.**
+If a position error of 0.5 m occurs in one frame (0.1 s at 10 Hz), the
+implied velocity error is 0.5 / 0.1 = **5 m/s**. That is larger than
+walking pace, introduced from sensor noise. Filtering removes the noise
+before differentiation, so the derivatives you compute reflect actual
+movement rather than sensor error.
+
+------------------------------------------------------------------------
+
+## 2. The Frequency Domain
+
+To understand filtering, we need to think in terms of frequencies.
+*Mathematician Joseph Fourier* proposed that we can think of any signal,
+as a bunch of different waves oscillating at different frequencies. So
+let's walk through our example file, and see how different waves allow
+us to describe motion data...
+
+A GPS position time-series contains:
+
+-   **Low-frequency content (0–2 Hz):** the athlete's actual movement —
+    running, turning, decelerating. These patterns change slowly.
+-   **High-frequency content (2–5 Hz and above):** measurement noise.
+    This changes randomly from frame to frame.
+
+In sports science, we usually use a *low pass* filter. Here we allow the
+***low values*** to pass through. Meanwhile, we *attenuate (*or reduce)
+the noise associated with the jitters I mentioned earlier.
+
+### What is a Hertz?
+
+One Hertz (Hz) means one complete cycle per second. A runner who
+accelerates and decelerates once every two seconds produces a pattern at
+0.5 Hz. Random GPS jitter that flips direction every 0.1 s operates at
+10 Hz. The filter separates these two.
+
+### The Nyquist frequency
+
+At a sample rate of 10 Hz, the fastest variation you can measure
+oscillates at 5 Hz (changing every 0.1 s). This upper limit is called
+the **Nyquist frequency** — always exactly half the sample rate. You
+cannot specify a cutoff at or above Nyquist; *motiongrammar* will throw
+an error if you try.
+
+------------------------------------------------------------------------
+
+## 3. Key filter concepts
+
+### Cutoff frequency
+
+The **cutoff frequency** defines the boundary between what the filter
+passes and what it attenuates. A cutoff of 1.5 Hz means: "let through
+everything below 1.5 Hz. Reduce everything above it."
+
+### Roll-off
+
+**Roll-off** describes how steeply the filter attenuates signals above
+the cutoff. It is measured in **decibels per octave** (dB per doubling
+of frequency).
+
+If the cutoff is 2 Hz. A signal at 2 Hz passes at full strength. A
+signal at 4 Hz (one octave above cutoff) is attenuated by the roll-off
+amount. For a 2nd-order Butterworth filter the roll-off is approximately
+12 dB/octave — meaning the 4 Hz signal exits at about one-quarter of its
+original power. At 8 Hz (two octaves up) it is one-sixteenth.
+
+**Higher filter order → steeper roll-off → sharper cutoff**, but with
+increasing risk of ringing artefacts near the cutoff frequency. Second
+order is the biomechanics standard for this reason.
+
+### Attenuation
+
+**Attenuation** is how much a filter reduces the amplitude of a signal
+at a given frequency, expressed in decibels:
+
+```         
+Attenuation (dB) = 20 × log10(output_amplitude / input_amplitude)
+```
+
+| dB | What it means |
+|-----------------|-------------------------------------------------------|
+| 0 dB | No change — signal passes unchanged |
+| −3 dB | Amplitude reduced to 70.7% — this is the standard definition of the cutoff frequency for Butterworth |
+| −20 dB | Amplitude reduced to 10% |
+| −40 dB | Amplitude reduced to 1% |
+
+When someone says "the cutoff is 1.5 Hz", they mean the signal at 1.5 Hz
+is attenuated by 3 dB — reduced to \~70% of its original amplitude.
+Frequencies well above the cutoff are attenuated far more.
+
+### Phase shift
+
+A causal filter (one that only looks backward in time, like EMA)
+introduces a **phase lag** — the filtered output trails the raw input in
+time. This distorts the timing of acceleration peaks and turning events.
+The Butterworth filter in *motiongrammar* is applied **zero-phase** via
+`signal::filtfilt()` — forward and backward passes cancel each other's
+phase shift, leaving the filtered signal perfectly time-aligned with the
+raw data.
+
+------------------------------------------------------------------------
+
+## 4. Finding the right cutoff — `filtrate_cutoff()`
+
+### 4.1 Residual analysis (Winter, 2009)
+
+This method sweeps a range of cutoff frequencies, applies the filter at
+each one, and computes the RMS of the residual (raw − filtered). When
+the cutoff is low, too much real signal is removed and the residual is
+large. As you raise it, the residual drops until only noise remains —
+the residual flattens. The **elbow of that curve** is the optimal
+cutoff.
+
+```{r load-for-cutoff, include=FALSE}
+library(motiongrammar)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20)
+```
+
+```{r cutoff-residual, fig.height=4}
+filtrate_cutoff(
+  trace_pre,
+  method       = "butterworth",
+  target       = "coordinates",
+  axis         = "x",
+  plot_type    = "residual",
+  cutoff_range = c(0.1, 4),
+  n_steps      = 60
+)
+```
+
+The dashed red line marks the suggested cutoff (point of maximum
+curvature of the smoothed residual curve). Use it as a starting point,
+not a hard rule.
+
+### 4.2 Power Spectral Density (PSD)
+
+The PSD shows how signal power is distributed across frequencies. Real
+movement energy clusters at low frequencies; noise is relatively flat at
+higher frequencies. Use this to confirm where the signal ends.
+
+```{r cutoff-psd, fig.height=4}
+filtrate_cutoff(
+  trace_pre,
+  method    = "butterworth",
+  target    = "coordinates",
+  axis      = "x",
+  plot_type = "psd"
+)
+```
+
+### 4.3 Side-by-side
+
+```{r cutoff-both, fig.height=5}
+filtrate_cutoff(
+  trace_pre,
+  method       = "butterworth",
+  target       = "coordinates",
+  axis         = "x",
+  plot_type    = "both",
+  cutoff_range = c(0.1, 4),
+  n_steps      = 60
+)
+```
+
+A cutoff of **1–2 Hz** is typical for GPS position data at 10 Hz. If
+both plots look nearly flat, the data was already filtered by the device
+before export — very common with higher-end sport GPS systems.
+
+------------------------------------------------------------------------
+
+## 5. Should we filter coordinates or derivatives?
+
+This is a common debate in biomechanics, that I am not fully qualified
+to contribute to. Therefore, I support both options in *motiongrammar*,
+with a slight preference to filtering coordinates rather than
+derivatives. My reasoning for this is because in *motiongrammar* we deal
+with velocity, acceleration and angular velocity– all of which operate
+on different units. It is smoother to work out a filter on xyz for all
+of these, versus running different filters on derivatives. But you do
+you!
+
+**Filter coordinates first, then differentiate** (Winter, 2009): the
+position signal is the primary measurement; smoothing it once propagates
+consistently to all derivatives.
+
+**Differentiate first, then filter derivatives directly**: proponents
+argue this isolates noise in the derivative domain where it is easier to
+see.
+
+*motiongrammar* supports both via the `target` argument. The recommended
+default is to filter coordinates. Whatever you choose, **report it in
+any publication**: the method, order, and cutoff frequency.
+
+------------------------------------------------------------------------
+
+## 6. Applying the filter
+
+```{r filtrate}
+trace <- trace_pre |>
+  filtrate(
+    method = "butterworth",
+    target = "coordinates",
+    n      = 2,       # 2nd order — standard in biomechanics
+    cutoff = 1.5,     # Hz — chosen from filtrate_cutoff() above
+    type   = "low"
+  )
+```
+
+### Raw vs filtered comparison
+
+```{r compare-plot}
+# Pull out a representative 60-second window with GPS data
+window <- trace |>
+  filter(!is.na(f_x)) |>
+  slice(1:600)
+
+window |>
+  ggplot(aes(x = unix_time)) +
+  geom_line(aes(y = x,   colour = "Raw"),      linewidth = 0.5) +
+  geom_line(aes(y = f_x, colour = "Filtered"), linewidth = 0.5) +
+  scale_colour_manual(values = c(Raw = "firebrick2", Filtered = "steelblue")) +
+  labs(
+    title  = "x coordinate — raw vs Butterworth filtered (1.5 Hz, 2nd order)",
+    x      = "Unix time (s)",
+    y      = "x (m)",
+    colour = NULL
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(), legend.position = "top")
+```
+
+```{r compare-traj}
+# Filtered trajectory is smoother — compare the path shapes
+bind_rows(
+  trace |> filter(!is.na(x))   |> select(x, y)   |> mutate(type = "Raw"),
+  trace |> filter(!is.na(f_x)) |> select(x = f_x, y = f_y) |> mutate(type = "Filtered")
+) |>
+  ggplot(aes(x = x, y = y, colour = type)) +
+  geom_path(alpha = 0.6, linewidth = 0.5) +
+  coord_fixed() +
+  scale_colour_manual(values = c(Raw = "firebrick2", Filtered = "steelblue")) +
+  labs(
+    title  = "Trajectory — raw vs filtered",
+    x      = "x (m)", y = "y (m)", colour = NULL
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(), legend.position = "top")
+```
+
+If the two trajectories are nearly identical, the provider already
+filtered the data before export.
+
+------------------------------------------------------------------------
+
+## 7. Available filter methods
+
+### Butterworth (recommended)
+
+Zero-phase IIR filter. Applied forward and backward via
+`signal::filtfilt()` so the output is time-aligned with the input.
+Standard in biomechanics (Winter, 2009).
+
+**Key parameters:**
+
+| Parameter | Guidance |
+|--------------------------------------|----------------------------------|
+| `n` | Filter order. 2nd order gives 40 dB/decade rolloff with no ringing. |
+| `cutoff` | Must be between 0 and Nyquist (sample_rate / 2). |
+| `type` | `"low"` for noise removal (almost always). |
+
+### Simple Moving Average (SMA)
+
+Replaces each value with the mean of the surrounding `window` points. At
+10 Hz, `window = 10` averages over 1 second. Gentle roll-off —
+attenuates noise gradually rather than sharply. Edge rows become `NA`.
+
+```{r sma, eval=FALSE}
+trace |> filtrate(method = "sma", target = "coordinates", window = 5)
+```
+
+### Exponential Moving Average (EMA)
+
+Weights past values exponentially. Causal — introduces phase lag. Best
+for real-time streaming, not post-processing.
+
+```{r ema, eval=FALSE}
+trace |> filtrate(method = "ema", target = "coordinates", alpha = 0.3)
+```
+
+### Savitzky-Golay
+
+Fits a polynomial through a sliding window. Better at preserving peaks
+and troughs than SMA because a polynomial can still pass through local
+maxima. Requires the `signal` package.
+
+```{r savgol, eval=FALSE}
+trace |> filtrate(method = "savgol", target = "coordinates",
+                  window = 11, poly_order = 3)
+```
+
+------------------------------------------------------------------------
+
+## 8. The `f_` columns
+
+For each filtered column, `filtrate()` creates a new `f_` prefixed
+column. The raw column is always kept.
+
+| Raw        | Filtered     |
+|------------|--------------|
+| `x`        | `f_x`        |
+| `y`        | `f_y`        |
+| `velocity` | `f_velocity` |
+
+`derivate()` automatically uses `f_x` / `f_y` when they exist.
+
+------------------------------------------------------------------------
+
+## 9. Targeting specific signals
+
+```{r target, eval=FALSE}
+# Coordinates (default)
+trace |> filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5)
+
+# Velocity only (use after derivate())
+trace |> filtrate(method = "butterworth", target = "velocity", cutoff = 2.0)
+
+# Both velocity and acceleration
+trace |> filtrate(method = "butterworth",
+                  target = c("velocity", "acceleration"), cutoff = 2.0)
+```
+
+------------------------------------------------------------------------
+
+## 10. Reading the quality log
+
+```{r quality}
+quality_report(trace)
+```
+
+The filtrate section records every pass: method, parameters, which
+source columns were filtered, NAs introduced by edge effects, and
+package versions for full reproducibility.
+
+------------------------------------------------------------------------
+
+## Quick reference
+
+| Argument     | Default         | Purpose                                    |
+|-----------------|-----------------|--------------------------------------|
+| `method`     | `"butterworth"` | Filter algorithm                           |
+| `target`     | `"coordinates"` | Signal(s) to filter                        |
+| `n`          | `2`             | Butterworth filter order                   |
+| `cutoff`     | `1`             | Butterworth cutoff frequency (Hz)          |
+| `type`       | `"low"`         | Butterworth filter type                    |
+| `window`     | `5`             | SMA or Savitzky-Golay window size (rows)   |
+| `alpha`      | `0.3`           | EMA smoothing factor (0 = heavy, 1 = none) |
+| `poly_order` | `2`             | Savitzky-Golay polynomial order            |

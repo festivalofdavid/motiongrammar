@@ -1,0 +1,244 @@
+---
+title: "Elaborate: Adding Custom Metrics to a Motion Trace"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Elaborate: Adding Custom Metrics to a Motion Trace}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width  = 7,
+  fig.height = 4,
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+```{r pipeline-setup, include=FALSE}
+devtools::load_all()
+library(ggplot2)
+library(dplyr)
+
+# Build through designate — we demonstrate elaborate() here
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5) |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity")) |>
+  designate(method = "corbett", v_threshold = 0.3)
+```
+
+`elaborate()` is the *motiongrammar*-safe version of `dplyr::mutate()`.
+It adds or modifies columns while preserving the `motion_trace` class
+and all attached attributes (`metadata`, `quality`).
+
+------------------------------------------------------------------------
+
+## 1. The problem it solves
+
+`motion_trace` objects carry two attributes alongside the data. Standard
+`dplyr::mutate()` silently drops them:
+
+```{r problem, eval=FALSE}
+# This loses metadata and quality:
+trace <- trace |> dplyr::mutate(curved_load = velocity * abs(angular_velocity))
+
+# This preserves them:
+trace <- trace |> elaborate(curved_load = velocity * abs(angular_velocity))
+```
+
+Use `elaborate()` any time you want to add a column to a `motion_trace`.
+
+------------------------------------------------------------------------
+
+## 2. Basic usage
+
+```{r basic}
+library(motiongrammar)
+library(ggplot2)
+library(dplyr)
+
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5) |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity")) |>
+  designate(method = "corbett", v_threshold = 0.3)
+
+trace <- trace_pre |>
+  elaborate(
+    curved_load  = velocity * abs(angular_velocity),
+    speed_kmh    = velocity * 3.6,
+    is_hsr       = velocity >= 5.5
+  )
+
+summary(trace$curved_load)
+```
+
+Later expressions can reference columns created earlier in the same
+call:
+
+```{r sequential}
+trace <- trace_pre |>
+  elaborate(
+    speed_kmh  = velocity * 3.6,
+    is_sprint  = speed_kmh > 25
+  )
+```
+
+------------------------------------------------------------------------
+
+## 3. Visualising custom metrics
+
+### Curved load on the field trajectory
+
+```{r curved-load-field, fig.height=5}
+trace <- trace_pre |>
+  elaborate(curved_load = velocity * abs(angular_velocity))
+
+trace |>
+  filter(!is.na(f_x), curved_load < 500) |>
+  ggplot(aes(x = f_x, y = f_y, colour = curved_load)) +
+  geom_path(linewidth = 1.3) +
+  coord_fixed() +
+  scale_colour_viridis_c(option = "magma", begin = 0.1, end = 0.95) +
+  labs(
+    title    = "Curved load — velocity × |angular velocity|",
+    subtitle = "Bright = high combined speed and turning",
+    x = "x (m)", y = "y (m)", colour = "Curved\nload"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+### Curved load time-series
+
+```{r curved-load-ts}
+trace |>
+  filter(!is.na(f_x)) |>
+  ggplot(aes(x = unix_time, y = curved_load)) +
+  geom_line(linewidth = 0.3, colour = "darkorchid") +
+  labs(
+    title = "Curved load over time",
+    x     = "Unix time (s)",
+    y     = "Curved load (m/s × °/s)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+------------------------------------------------------------------------
+
+## 4. Grouped calculations with `by`
+
+The `by` argument groups the data before mutating and ungroups it after.
+This is the mechanism for **within-segment** calculations.
+
+### Within-segment normalisation
+
+```{r by-designation}
+trace <- trace_pre |>
+  elaborate(
+    vel_pct_peak = velocity / max(velocity, na.rm = TRUE) * 100,
+    by = "designation"
+  )
+
+# Each designation segment now has its own peak as 100%
+trace |>
+  filter(!is.na(f_x)) |>
+  group_by(designation) |>
+  summarise(max_pct = max(vel_pct_peak, na.rm = TRUE),
+            mean_pct = round(mean(vel_pct_peak, na.rm = TRUE), 1))
+```
+
+### Time since segment start
+
+```{r by-time}
+trace <- trace_pre |>
+  elaborate(
+    time_in_segment = unix_time - min(unix_time, na.rm = TRUE),
+    by = "designation"
+  )
+```
+
+------------------------------------------------------------------------
+
+## 5. Logging expressions — `log_expr`
+
+Set `log_expr = TRUE` to store the formula text in the quality log —
+useful for methods sections of publications where you want the full
+computational chain embedded in the data object:
+
+```{r log-expr}
+trace <- trace_pre |>
+  elaborate(
+    curved_load = velocity * abs(angular_velocity),
+    log_expr    = TRUE
+  )
+
+# Retrieve the expression from the quality log
+attr(trace, "quality")$elaborate[[1]]$expressions
+```
+
+------------------------------------------------------------------------
+
+## 6. Practical examples
+
+```{r examples}
+trace <- trace_pre |>
+  elaborate(
+    # Intensity flags
+    is_hsr    = velocity >= 5.5,
+    is_sprint = velocity >= 7.0,
+    # Composite metrics
+    curved_load  = velocity * abs(angular_velocity),
+    power_proxy  = velocity * pmax(acceleration, 0),   # positive work only
+    # Unit conversion
+    speed_kmh = velocity * 3.6
+  )
+
+# Proportion of active period in HSR
+trace |>
+  filter(designation == "active_1") |>
+  summarise(
+    pct_hsr    = round(mean(is_hsr,    na.rm = TRUE) * 100, 1),
+    pct_sprint = round(mean(is_sprint, na.rm = TRUE) * 100, 1)
+  )
+```
+
+------------------------------------------------------------------------
+
+## 7. Reading the quality log
+
+```{r quality}
+quality_report(trace)
+```
+
+The elaborate section records every call: timestamp, columns added,
+columns modified, the `by` grouping used, and expression text if
+`log_expr = TRUE`.
+
+------------------------------------------------------------------------
+
+## Quick reference
+
+| Argument   | Default | Purpose                                                         |
+|------------|---------|-----------------------------------------------------------------|
+| `...`      | —       | Column expressions — same syntax as `dplyr::mutate()`          |
+| `by`       | `NULL`  | Group by these columns before mutating, ungroup after          |
+| `log_expr` | `FALSE` | Store expression text in the quality log                       |

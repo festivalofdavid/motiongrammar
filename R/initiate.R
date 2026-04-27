@@ -2410,7 +2410,23 @@ guess_csv_template <- function(path, save_path = NULL, coord_system = "auto") {
   skip_n  <- attr(trace, "skip") %||% 0L
   cs      <- attr(trace, "coord_system_detected") %||% "gps"
 
-  col_unix <- mapping$unix_time
+  # Read the raw header row so we can detect duplicate column names and replace
+  # them with integer indices (which are unambiguous).
+  raw_lines  <- readLines(path, n = skip_n + 1L, warn = FALSE)
+  raw_header <- raw_lines[skip_n + 1L]
+  raw_cols   <- trimws(strsplit(raw_header, ",")[[1]])
+  raw_cols   <- raw_cols[nchar(raw_cols) > 0]
+  raw_lower  <- tolower(raw_cols)
+
+  # Return the 1-based integer index of `name` when it appears more than once
+  # in the raw header; otherwise return the name as-is (cleaner template output).
+  safe_ref <- function(name) {
+    if (is.null(name)) return(NULL)
+    hits <- which(raw_lower == tolower(name))
+    if (length(hits) > 1L) hits[1L] else name
+  }
+
+  col_unix <- safe_ref(mapping$unix_time)
   if (is.null(col_unix))
     stop("guess_csv_template(): could not detect a unix_time column — ",
          "specify column names manually with csv_template()")
@@ -2422,9 +2438,9 @@ guess_csv_template <- function(path, save_path = NULL, coord_system = "auto") {
     tmpl <- csv_template(
       coord_system = "gps",
       col_unix     = col_unix,
-      col_lat      = mapping$lat,
-      col_lng      = mapping$lng,
-      col_altitude = mapping$altitude,
+      col_lat      = safe_ref(mapping$lat),
+      col_lng      = safe_ref(mapping$lng),
+      col_altitude = safe_ref(mapping$altitude),
       skip         = skip_n
     )
   } else {
@@ -2434,9 +2450,9 @@ guess_csv_template <- function(path, save_path = NULL, coord_system = "auto") {
     tmpl <- csv_template(
       coord_system = "local",
       col_unix     = col_unix,
-      col_x        = mapping$x,
-      col_y        = mapping$y,
-      col_z        = mapping$z,
+      col_x        = safe_ref(mapping$x),
+      col_y        = safe_ref(mapping$y),
+      col_z        = safe_ref(mapping$z),
       skip         = skip_n
     )
   }

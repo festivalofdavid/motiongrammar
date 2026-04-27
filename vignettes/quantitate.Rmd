@@ -1,0 +1,285 @@
+---
+title: "Quantitate: Summarising a Motion Trace"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Quantitate: Summarising a Motion Trace}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width  = 7,
+  fig.height = 4,
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+```{r pipeline-setup, include=FALSE}
+devtools::load_all()
+library(ggplot2)
+library(dplyr)
+
+# Full pipeline up to allocate — we demonstrate quantitate() here
+trace <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5) |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity")) |>
+  designate(method = "corbett", v_threshold = 0.3) |>
+  allocate(
+    allocation = list(
+      velocity     = c(0, 2, 4, 6, 8),
+      acceleration = c(0, 1, 2, 3, 4)
+    ),
+    allocation_name = "gps_standard"
+  )
+```
+
+`quantitate()` collapses a frame-by-frame `motion_trace` into a tidy
+summary table grouped by designation segment, intensity band, or both.
+You define what to compute — distance, time, peak velocity — and it
+groups and summarises accordingly.
+
+------------------------------------------------------------------------
+
+## 1. The three scopes
+
+### `scope = 'designation'` — per-segment breakdown
+
+```{r load-full-pipeline, include=FALSE}
+library(motiongrammar)
+library(ggplot2)
+library(dplyr)
+
+trace <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5) |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity")) |>
+  designate(method = "corbett", v_threshold = 0.3) |>
+  allocate(
+    allocation = list(
+      velocity     = c(0, 2, 4, 6, 8),
+      acceleration = c(0, 1, 2, 3, 4)
+    ),
+    allocation_name = "gps_standard"
+  )
+```
+
+```{r by-segment}
+library(motiongrammar)
+library(ggplot2)
+library(dplyr)
+
+summary_by_segment <- trace |>
+  quantitate(
+    allocation  = "gps_standard",
+    derivative  = "velocity",
+    scope       = "designation",
+    active_only = FALSE,
+    n_frames    = dplyr::n(),
+    time_s      = dplyr::n() / 10,
+    dist_m      = sum(distance, na.rm = TRUE),
+    mean_vel    = round(mean(velocity, na.rm = TRUE), 2),
+    peak_vel    = round(max(velocity, na.rm = TRUE), 2)
+  )
+
+summary_by_segment
+```
+
+### `scope = 'session'` — whole-session band totals
+
+```{r by-session}
+session_totals <- trace |>
+  quantitate(
+    allocation = "gps_standard",
+    derivative = "velocity",
+    scope      = "session",
+    time_s     = dplyr::n() / 10,
+    dist_m     = sum(distance, na.rm = TRUE),
+    peak_vel   = round(max(velocity, na.rm = TRUE), 2)
+  )
+
+session_totals
+```
+
+### `scope = 'active'` — active periods only
+
+```{r by-active}
+active_totals <- trace |>
+  quantitate(
+    allocation = "gps_standard",
+    derivative = "velocity",
+    scope      = "active",
+    time_s     = dplyr::n() / 10,
+    dist_m     = sum(distance, na.rm = TRUE)
+  )
+
+active_totals
+```
+
+------------------------------------------------------------------------
+
+## 2. Visualising the summary
+
+### Distance by velocity band
+
+```{r plot-dist-band}
+session_totals |>
+  filter(!is.na(gps_standard_velocity_band)) |>
+  ggplot(aes(x = gps_standard_velocity_band, y = dist_m,
+             fill = gps_standard_velocity_band)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
+  labs(
+    title = "Distance covered in each velocity band (whole session)",
+    x     = "Velocity band",
+    y     = "Distance (m)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+### Time by velocity band
+
+```{r plot-time-band}
+session_totals |>
+  filter(!is.na(gps_standard_velocity_band)) |>
+  ggplot(aes(x = gps_standard_velocity_band, y = time_s,
+             fill = gps_standard_velocity_band)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
+  labs(
+    title = "Time in each velocity band (whole session)",
+    x     = "Velocity band",
+    y     = "Duration (s)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+### Designation × band heatmap
+
+```{r plot-heatmap, fig.height=3}
+summary_by_segment |>
+  filter(!is.na(gps_standard_velocity_band)) |>
+  ggplot(aes(x = gps_standard_velocity_band, y = designation,
+             fill = dist_m)) +
+  geom_tile(colour = "white", linewidth = 0.5) +
+  scale_fill_viridis_c(option = "plasma", begin = 0.1, end = 0.9) +
+  labs(
+    title  = "Distance (m) by segment and velocity band",
+    x      = "Velocity band",
+    y      = "Designation",
+    fill   = "Dist (m)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+------------------------------------------------------------------------
+
+## 3. Summarising without intensity bands
+
+```{r no-bands}
+# One row per designation segment
+segment_totals <- trace |>
+  quantitate(
+    allocation = NULL,
+    scope      = "designation",
+    time_s     = dplyr::n() / 10,
+    dist_m     = sum(distance, na.rm = TRUE),
+    peak_vel   = round(max(velocity, na.rm = TRUE), 2)
+  )
+
+segment_totals
+```
+
+------------------------------------------------------------------------
+
+## 4. `band_duration()` — convenience wrapper
+
+```{r band-duration}
+duration_tbl <- band_duration(
+  trace,
+  allocation  = "gps_standard",
+  derivative  = "velocity",
+  scope       = "designation",
+  active_only = TRUE
+)
+
+duration_tbl
+```
+
+```{r plot-duration}
+duration_tbl |>
+  filter(!is.na(gps_standard_velocity_band)) |>
+  ggplot(aes(x = gps_standard_velocity_band, y = duration_sec,
+             fill = gps_standard_velocity_band)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
+  labs(
+    title = "Duration in each velocity band (active segments only)",
+    x     = "Velocity band", y = "Duration (s)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+------------------------------------------------------------------------
+
+## 5. Saving results
+
+```{r save, eval=FALSE}
+# Preserves the full quality log
+saveRDS(summary_by_segment, "~/outputs/session_summary.rds")
+
+# CSV — attributes are dropped (expected)
+readr::write_csv(summary_by_segment, "~/outputs/session_summary.csv")
+
+# Save quality log separately if needed alongside CSV
+saveRDS(attr(summary_by_segment, "quality"), "~/outputs/session_quality.rds")
+```
+
+------------------------------------------------------------------------
+
+## 6. Reading the quality log
+
+```{r quality}
+qual <- attr(summary_by_segment, "quality")
+names(qual)   # every step that ran
+qual$quantitate[[1]]$scope
+qual$quantitate[[1]]$group_vars
+qual$quantitate[[1]]$n_rows_in
+qual$quantitate[[1]]$n_rows_out
+```
+
+The quality log attached to the summary tibble contains the complete
+pipeline record — from `initiate()` through to `quantitate()`.
+
+------------------------------------------------------------------------
+
+## Quick reference
+
+| Argument      | Default          | Purpose                                              |
+|---------------|------------------|------------------------------------------------------|
+| `allocation`  | `"allocation_1"` | Allocation name, or `NULL` for no band grouping      |
+| `derivative`  | `"velocity"`     | Which band columns to group by (one or more)         |
+| `scope`       | `"designation"`  | `"designation"`, `"session"`, or `"active"`          |
+| `active_only` | `FALSE`          | Restrict to `active_*` segments (designation scope)  |
+| `...`         | —                | Any `dplyr::summarise()` expressions                 |

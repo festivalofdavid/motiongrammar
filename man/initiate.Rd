@@ -6,7 +6,7 @@
 \usage{
 initiate(
   source = "auto",
-  session = "17134112147",
+  session = NULL,
   coord_system = "gps",
   verbose = TRUE,
   template = NULL,

@@ -1,0 +1,230 @@
+---
+title: "Interpolate: Repairing Gaps in Tracking Data"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Interpolate: Repairing Gaps in Tracking Data}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width  = 7,
+  fig.height = 4,
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+```{r pipeline-setup, include=FALSE}
+devtools::load_all()
+library(ggplot2)
+library(dplyr)
+
+# Build trace up to the point before interpolation
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE)
+```
+
+`interpolate()` repairs the gap in our GPS data by constructing a dense,
+evenly-spaced time grid at the target frame rate and filling missing
+positions.
+
+------------------------------------------------------------------------
+
+## 1. Why you need interpolation
+
+Most downstream calculations — filtering, differentiation, distance
+accumulation — assume frames are evenly spaced in time. A raw GPS file
+with irregular timing violates this assumption and produces incorrect
+derivatives. Even a 1-frame gap at 10 Hz means the finite difference at
+that boundary spans 0.2 s instead of 0.1 s, doubling the computed
+velocity for that frame.
+
+Our example file illustrates this clearly. The player was indoors for
+the first ~10 minutes with no GPS signal — those rows arrived as lat/lng
+= 0 and were set to NA by `coordinate()`:
+
+```{r show-gap}
+library(motiongrammar)
+library(ggplot2)
+library(dplyr)
+
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE)
+
+# How many rows have no GPS?
+cat("Total rows:", nrow(trace_pre), "\n")
+cat("Rows with NA x (no GPS fix):", sum(is.na(trace_pre$x)), "\n")
+cat("Rows with valid GPS:", sum(!is.na(trace_pre$x)), "\n")
+```
+
+```{r plot-pre-interp}
+trace_pre |>
+  mutate(has_gps = !is.na(x)) |>
+  ggplot(aes(x = unix_time, y = ifelse(has_gps, 1, 0), fill = has_gps)) +
+  geom_col(width = 1) +
+  scale_fill_manual(
+    values = c("FALSE" = "firebrick2", "TRUE" = "steelblue"),
+    labels = c("FALSE" = "No GPS fix", "TRUE" = "Valid GPS")
+  ) +
+  labs(
+    title = "GPS signal availability over time",
+    x     = "Unix time (s)",
+    y     = NULL,
+    fill  = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid    = element_blank(),
+    axis.text.y   = element_blank(),
+    axis.ticks.y  = element_blank(),
+    legend.position = "top"
+  )
+```
+
+The red block at the start is the ~600-second indoor period.
+`interpolate()` leaves this large gap as `NA` (it exceeds
+`max_gap_frames`) and fills only the smaller dropouts within the GPS
+period.
+
+------------------------------------------------------------------------
+
+## 2. Basic usage
+
+```{r interpolate}
+trace <- trace_pre |>
+  interpolate(
+    method         = "linear",
+    hz             = 10,
+    max_gap_frames = 20    # fill gaps up to 2 seconds; leave larger ones as NA
+  )
+
+cat("Rows before:", nrow(trace_pre), "\n")
+cat("Rows after:", nrow(trace), "\n")
+cat("Rows interpolated:", sum(trace$is_interpolated, na.rm = TRUE), "\n")
+cat("Interpolation rate:", round(mean(trace$is_interpolated, na.rm = TRUE) * 100, 1), "%\n")
+```
+
+------------------------------------------------------------------------
+
+## 3. Visualising the `is_interpolated` flag
+
+Every filled row receives `is_interpolated = TRUE`. You can see exactly
+which positions are real and which are estimated:
+
+```{r plot-interpolated}
+trace |>
+  filter(!is.na(x)) |>
+  ggplot(aes(x = x, y = y, colour = is_interpolated)) +
+  geom_point(size = 0.4, alpha = 0.6) +
+  coord_fixed() +
+  scale_colour_manual(
+    values = c("FALSE" = "steelblue", "TRUE" = "firebrick2"),
+    labels = c("FALSE" = "Recorded", "TRUE" = "Interpolated")
+  ) +
+  labs(
+    title  = "Recorded vs interpolated positions",
+    x      = "x (m)", y = "y (m)", colour = NULL
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(), legend.position = "top")
+```
+
+In a well-functioning GPS session most points should be blue. Clusters of
+red indicate where the signal dropped and linear fill was used.
+
+------------------------------------------------------------------------
+
+## 4. The `max_gap_frames` threshold
+
+Not all gaps should be filled. A 0.3-second GPS dropout during a sprint
+is sensor noise — interpolating it is reasonable. A 600-second gap while
+the player was indoors is not a dropout — filling it would fabricate
+positions that never existed.
+
+`max_gap_frames` (default: 5) controls this boundary. Gaps of this many
+consecutive missing frames or fewer are filled; longer gaps are left as
+`NA`.
+
+```{r max-gap, eval=FALSE}
+# At 10 Hz: fill gaps up to 2 seconds; leave longer gaps as NA
+trace <- trace_pre |>
+  interpolate(hz = 10, max_gap_frames = 20)
+
+# More conservative: only fill single-frame dropouts
+trace <- trace_pre |>
+  interpolate(hz = 10, max_gap_frames = 3)
+```
+
+**How to set it:** Multiply your threshold in seconds by `hz`.
+For field-sport GPS, 1–3 seconds (10–30 frames at 10 Hz) is typical.
+Anything longer is likely a genuine off-field period that `designate()`
+handles better than interpolation.
+
+------------------------------------------------------------------------
+
+## 5. Interpolation methods
+
+### `"linear"` (default)
+
+Draws a straight line between the last known position and the first known
+position after the gap. Safe for short dropouts.
+
+### `"spline"`
+
+Fits a natural cubic spline through the surrounding valid positions. Better
+at following curved paths, but can overshoot in noisy data — always
+check the trajectory plot after using spline.
+
+### `"constant"` — last observation carried forward
+
+Repeats the last known position for every missing frame. Treats the
+player as stationary during the gap. Useful for RFID / UWB systems with
+zone-boundary dropouts.
+
+```{r methods-compare}
+trace_spline   <- trace_pre |> interpolate(method = "spline",   hz = 10, max_gap_frames = 20)
+trace_constant <- trace_pre |> interpolate(method = "constant", hz = 10, max_gap_frames = 20)
+
+# Compare: how many NAs remain?
+lapply(list(linear = trace, spline = trace_spline, constant = trace_constant), function(tr) {
+  c(na_x = sum(is.na(tr$x)), interpolated = sum(tr$is_interpolated, na.rm = TRUE))
+})
+```
+
+------------------------------------------------------------------------
+
+## 6. Reading the quality log
+
+```{r quality}
+quality_report(trace)
+```
+
+The interpolate section shows the gap structure before filling (count,
+min/max/mean gap length, how many exceeded `max_gap_frames`), how many
+NAs were filled in x and y, and how many remain. A high interpolation
+ratio (> 20–30%) is flagged as an issue.
+
+------------------------------------------------------------------------
+
+## Quick reference
+
+| Argument         | Default    | Purpose                                          |
+|------------------|------------|--------------------------------------------------|
+| `method`         | `"linear"` | `"linear"`, `"spline"`, or `"constant"`          |
+| `hz`             | from metadata | Target frame rate                             |
+| `max_gap_frames` | `5`        | Gaps larger than this (frames) are left as NA    |

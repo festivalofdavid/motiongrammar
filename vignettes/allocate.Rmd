@@ -1,0 +1,228 @@
+---
+title: "Allocate: Assigning Intensity Bands"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Allocate: Assigning Intensity Bands}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width  = 7,
+  fig.height = 4,
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+```{r pipeline-setup, include=FALSE}
+devtools::load_all()
+library(ggplot2)
+library(dplyr)
+
+# Build through designate — we demonstrate allocate() here
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5) |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity")) |>
+  designate(method = "corbett", v_threshold = 0.3)
+```
+
+`allocate()` cuts each derivative column into labelled intensity bands
+using user-defined thresholds. The result is a new ordered-factor column
+for each derivative that `quantitate()` uses to produce load profiles.
+
+------------------------------------------------------------------------
+
+## 1. Why intensity bands?
+
+Raw velocity tells you what happened in each frame. Intensity bands let
+you ask what proportion of the session was spent in each loading zone —
+the core question behind GPS profiling in team sport. By specifying the
+same thresholds for every player and every session, you create a
+consistent, comparable taxonomy.
+
+------------------------------------------------------------------------
+
+## 2. Basic usage
+
+```{r allocate}
+library(motiongrammar)
+library(ggplot2)
+library(dplyr)
+
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5) |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity")) |>
+  designate(method = "corbett", v_threshold = 0.3)
+
+trace <- trace_pre |>
+  allocate(
+    allocation = list(
+      velocity     = c(0, 2, 4, 6, 8),
+      acceleration = c(0, 1, 2, 3, 4),
+      angular_velocity = c(0, 90, 180, 270)
+    ),
+    allocation_name = "gps_standard"
+  )
+
+# New columns added:
+grep("band", names(trace), value = TRUE)
+```
+
+------------------------------------------------------------------------
+
+## 3. How thresholds define bands
+
+A vector of N values creates N−1 bands:
+
+```
+velocity = c(0, 2, 4, 6, 8)
+```
+
+| Band     | Range       | Typical label       |
+|----------|-------------|---------------------|
+| `band_1` | 0 – 2 m/s  | Walk                |
+| `band_2` | 2 – 4 m/s  | Jog                 |
+| `band_3` | 4 – 6 m/s  | Run                 |
+| `band_4` | 6+ m/s     | High-speed run      |
+
+Values above the highest threshold fall into the top band (open upper
+bound). Values below the lowest threshold become `NA`. Bands are stored
+as **ordered factors** so `band_1 < band_2 < band_3` — comparisons and
+bar chart ordering work correctly.
+
+Acceleration and angular velocity use `abs()` before banding — a
+deceleration of −4 m/s² and an acceleration of +4 m/s² represent equal
+magnitudes of loading.
+
+------------------------------------------------------------------------
+
+## 4. Visualising the band distribution
+
+```{r band-bar}
+# Time in each velocity band across the active segment
+trace |>
+  filter(designation == "active_1", !is.na(gps_standard_velocity_band)) |>
+  count(gps_standard_velocity_band) |>
+  mutate(duration_s = n / 10) |>
+  ggplot(aes(x = gps_standard_velocity_band, y = duration_s,
+             fill = gps_standard_velocity_band)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
+  labs(
+    title = "Time in each velocity band (active segment)",
+    x     = "Velocity band",
+    y     = "Duration (s)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+```{r band-traj, fig.height=5}
+# Colour the trajectory by velocity band
+trace |>
+  filter(!is.na(f_x), !is.na(gps_standard_velocity_band)) |>
+  ggplot(aes(x = f_x, y = f_y, colour = gps_standard_velocity_band)) +
+  geom_path(linewidth = 1.2) +
+  coord_fixed() +
+  scale_colour_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
+  labs(
+    title  = "Trajectory coloured by velocity band",
+    x      = "x (m)", y = "y (m)",
+    colour = "Velocity\nband"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+------------------------------------------------------------------------
+
+## 5. Multiple allocation schemes
+
+Call `allocate()` multiple times with different names to layer multiple
+profiling schemes onto the same trace:
+
+```{r multiple}
+trace <- trace_pre |>
+  allocate(
+    allocation      = list(velocity = c(0, 2, 4, 6, 8)),
+    allocation_name = "club_standard"
+  ) |>
+  allocate(
+    allocation      = list(velocity = c(0, 1.5, 3, 5, 6.5)),
+    allocation_name = "literature_2023"
+  )
+
+grep("band", names(trace), value = TRUE)
+```
+
+------------------------------------------------------------------------
+
+## 6. Loading thresholds from a CSV — `allocate_csv()`
+
+For team environments where thresholds are managed centrally, store them
+in a CSV and load with `allocate_csv()`:
+
+```{r allocate-csv, eval=FALSE}
+trace <- trace_pre |>
+  allocate_csv(file = "~/config/thresholds.csv")
+```
+
+**CSV format:**
+
+```csv
+profile_name,target_derivative,profile_start,profile_end
+gps_standard,velocity,0,2
+gps_standard,velocity,2,4
+gps_standard,velocity,4,6
+gps_standard,velocity,6,8
+gps_standard,acceleration,0,1
+gps_standard,acceleration,1,2
+gps_standard,acceleration,2,3
+gps_standard,acceleration,3,4
+```
+
+The source file path is stored in the quality log, so provenance is
+maintained even when thresholds change between seasons.
+
+------------------------------------------------------------------------
+
+## 7. Reading the quality log
+
+```{r quality}
+quality_report(trace)
+```
+
+The allocate section records each named scheme separately: band count,
+threshold values, the range of each band, and whether the source was
+inline code or a CSV file.
+
+------------------------------------------------------------------------
+
+## Quick reference
+
+| Argument         | Default          | Purpose                                    |
+|------------------|------------------|--------------------------------------------|
+| `allocation`     | Standard GPS set | Named list of threshold vectors            |
+| `allocation_name`| `"allocation_1"` | Prefix for the output band columns         |
+
+`allocate_csv()` — `file` is the only argument: path to a CSV with
+`profile_name`, `target_derivative`, `profile_start`, `profile_end`.

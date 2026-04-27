@@ -1,0 +1,474 @@
+---
+title: "Initiate: Loading Data into motiongrammar"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Initiate: Loading Data into motiongrammar}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  eval     = FALSE,
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+`initiate()` is the entry point for every *motiongrammar* pipeline. It
+reads raw tracking data from any supported source and returns a
+**`motion_trace`** object — a tidy tibble with two additional attributes
+(`metadata` and `quality`) that travel with the data through every
+downstream step.
+
+This vignette covers every data source in depth, explains the template
+system for reproducible workflows, and closes with a practical pattern
+for batch-processing an entire folder of GPS files.
+
+------------------------------------------------------------------------
+
+## 1. The motion_trace object
+
+Every call to `initiate()` returns the same structure regardless of
+source:
+
+| Component   | What it contains                                                     |
+|-------------|----------------------------------------------------------------------|
+| **Data**    | A tibble with `unix_time` plus coordinate columns (`lat`/`lng`/`altitude` for GPS, or `x`/`y`/`z` for local). Extra columns (velocity, heart rate, etc.) appear after the core columns. |
+| **Metadata** | A named list — sampling rate, duration, device info, player/session identifiers. Access with `metadata_report()`. |
+| **Quality** | An audit log seeded at ingestion and appended by every subsequent pipeline step. Access with `quality_report()`. |
+
+```{r show-structure, eval=FALSE}
+trace <- initiate(session = "player_01.csv", method = "guess")
+
+# Print a concise summary
+trace
+
+# Inspect metadata
+metadata_report(trace)
+
+# Inspect the quality log (what did initiate detect about this file?)
+quality_report(trace)
+```
+
+The quality log records things like coordinate completeness, sampling
+rate, temporal gaps, duplicate timestamps, and any automatic flags. It
+is updated automatically — you never need to write to it yourself.
+
+------------------------------------------------------------------------
+
+## 2. CSV files
+
+CSV is the most common format for GPS and optical tracking exports.
+*motiongrammar* offers three modes for reading CSV data, ranging from
+fully automatic to fully explicit.
+
+### 2.1 `guess_csv` — exploration mode
+
+```{r guess}
+trace <- initiate(
+  session = "~/data/player_01.csv",
+  source  = "guess_csv"
+)
+```
+
+The guess algorithm:
+
+1. Detects the start of the data block by finding the first row whose
+   comma count matches the modal comma count of the file. This strips
+   preamble rows automatically.
+2. Searches for timestamp, latitude, longitude, and altitude columns
+   using a prioritised list of exact and fuzzy-matched names (e.g.
+   `"Timestamp"`, `"UTC"`, `"frame_id"` → `unix_time`).
+3. Warns you if any column could not be resolved.
+
+`source = 'auto'` (the default when you supply a `.csv` path) routes to
+`guess_csv`:
+
+```{r auto}
+# Equivalent — extension triggers guess_csv automatically
+trace <- initiate(session = "~/data/player_01.csv")
+```
+
+**When to use:** One-off exploration, checking a new file format for the
+first time. Not recommended for production pipelines because the
+resolved column mapping can silently change if the file layout changes.
+
+### 2.2 `manual_csv` — explicit column names
+
+```{r manual-csv}
+trace <- initiate(
+  session     = "~/data/player_01.csv",
+  source      = "manual_csv",
+  col_unix    = "Timestamp",
+  col_lat     = "Latitude",
+  col_lng     = "Longitude",
+  col_altitude = "Elevation"
+)
+```
+
+You name the columns explicitly; *motiongrammar* does the rest
+(timestamp parsing, unit coercion, gap detection). Column matching is
+case-insensitive.
+
+Useful additional arguments:
+
+| Argument          | Default | Purpose                                       |
+|-------------------|---------|-----------------------------------------------|
+| `skip`            | `0`     | Header rows to skip before column names row (eg. catapult used to have some meta in their csv)   |
+| `max_empty_lines` | `3`     | Empty rows that signal end-of-data            |
+| `comment`         | `"#"`   | Lines starting with this character are ignored |
+
+**When to use:** When the column names are stable but you haven't yet
+formalised them into a saved template.
+
+### 2.3 `template_csv` — reproducible production mode
+
+A `csv_template` locks the column mapping into an object that can be
+saved to XML, version-controlled, and loaded in any future script
+without relying on heuristics.
+
+#### Creating a template manually
+
+```{r csv-template-manual}
+my_template <- csv_template(
+  coord_system = "gps",
+  col_unix     = "Timestamp",
+  col_lat      = "Latitude",
+  col_lng      = "Longitude",
+  col_altitude = "Elevation",
+  skip         = 0L
+)
+
+# Print to verify the mapping
+my_template
+```
+
+You can also carry extra columns through — anything you want preserved
+for use in `elaborate()` or `allocate()` later:
+
+```{r csv-template-extra}
+my_template <- csv_template(
+  coord_system    = "gps",
+  col_unix        = "Timestamp",
+  col_lat         = "Latitude",
+  col_lng         = "Longitude",
+  col_altitude    = "Elevation",
+  col_velocity    = "Speed",          # imported as `velocity`
+  col_acceleration = "Accel",         # imported as `acceleration`
+  col_extra       = c(
+    player_load  = "PlayerLoad",      # renamed to `player_load`
+    heart_rate   = "HR_bpm"           # renamed to `heart_rate`
+  )
+)
+```
+
+#### Generating a template automatically from a file
+
+If you already have a file that `guess_csv` reads correctly, capture
+the resolved schema in one step:
+
+```{r guess-csv-template}
+# Inspect and save in one call
+my_template <- guess_csv_template(
+  path      = "~/data/player_01.csv",
+  save_path = "~/templates/catapult_gps.xml"
+)
+
+# The saved XML can now be committed to version control
+```
+
+Check the returned template. If any column was mis-detected, tweak it
+with `csv_template()` and re-save.
+
+#### Saving and loading templates
+
+```{r save-load-template}
+# Save to XML
+save_csv_template(my_template, path = "~/templates/catapult_gps.xml")
+
+# Load in a future script
+my_template <- load_csv_template("~/templates/catapult_gps.xml")
+```
+
+#### Using the template with `initiate()`
+
+```{r initiate-template}
+# Pass the in-memory object
+trace <- initiate(session = "~/data/player_01.csv", template = my_template)
+
+# Or pass the file path directly — initiate() loads it for you
+trace <- initiate(
+  session  = "~/data/player_01.csv",
+  template = "~/templates/catapult_gps.xml"
+)
+```
+
+When a `template` argument is supplied, `source` is automatically set
+to `'template_csv'` — you don't need to specify it.
+
+------------------------------------------------------------------------
+
+## 3. GPX files
+
+GPX is the standard exchange format for consumer GPS devices (Garmin,
+Wahoo, Polar, Apple Watch, etc.).
+
+```{r gpx}
+trace <- initiate(
+  session = "~/data/run_2024-09-14.gpx",
+  source  = "gpx"
+)
+
+# Or let 'auto' detect the extension
+trace <- initiate(session = "~/data/run_2024-09-14.gpx")
+```
+
+Internally *motiongrammar* uses the `sf` package to read the
+`track_points` layer. The `ele` (elevation) field is imported as
+`altitude`; timestamp is converted to Unix seconds. The `sf` package is
+not listed as a hard dependency — if it isn't installed you'll see a
+clear error message with the install command.
+
+**Note:** If your GPX contains multiple tracks (e.g. a file exported
+after pausing and restarting), all track points are concatenated in
+chronological order. Large temporal gaps between tracks will be flagged
+in the quality log.
+
+------------------------------------------------------------------------
+
+## 4. Strava
+
+*motiongrammar* fetches GPS streams directly from the Strava v3 API.
+You need a one-time OAuth2 setup to obtain a `~/strava_tokens.json`
+file (client ID, client secret, refresh token). After that, token
+refresh is handled automatically. I'll create a separate guide on this.
+
+```{r strava-basic}
+# Pass the Strava activity ID (or the full activity URL)
+trace <- initiate(
+  session = "12345678901",
+  source  = "strava"
+)
+
+# Full URL also works
+trace <- initiate(
+  session = "https://www.strava.com/activities/12345678901",
+  source  = "strava"
+)
+```
+
+By default, *motiongrammar* requests `time`, `latlng`, and `altitude`
+streams. Activity metadata (name, sport type, start date, elapsed time)
+is fetched from the activity endpoint and stored in the `metadata`
+attribute automatically.
+
+### Customising Strava streams with `api_stream_template`
+
+If you want to pull additional streams (heart rate, power, cadence) or
+store your credentials somewhere other than `~/strava_tokens.json`,
+build an `api_stream_template`:
+
+```{r strava-template}
+strava_my_template <- api_stream_template(
+  api          = "strava",
+  token_path   = "~/credentials/strava.json",
+  stream_time  = "time",
+  stream_latlng = "latlng",
+  stream_altitude = "altitude",
+  stream_extra = c(
+    heart_rate = "heartrate",   # rename to heart_rate
+    watts      = "watts"
+  )
+)
+
+trace <- initiate(
+  session  = "12345678901",
+  template = strava_my_template
+)
+```
+
+------------------------------------------------------------------------
+
+## 5. Generic REST API
+
+Any JSON REST API can be connected via `api_stream_template`. The
+template captures the endpoint URL, authentication method, and
+field-to-column mapping. Once saved, any collaborator can reproduce the
+exact same ingestion without knowing the implementation details.
+
+### 5.1 Response formats
+
+*motiongrammar* handles three JSON response layouts:
+
+**`"records"`** — an array of row objects:
+```json
+[{"time": 1700000000, "lat": 51.5, "lng": -0.1}, ...]
+```
+
+**`"columnar"`** — an object of parallel arrays:
+```json
+{"time": [1700000000, ...], "lat": [51.5, ...], "lng": [-0.1, ...]}
+```
+
+**`"streams"`** — Strava-style, each key is an object with a `"data"` array:
+```json
+{"time": {"data": [1700000000, ...]}, "latlng": {"data": [[51.5, -0.1], ...]}}
+```
+
+### 5.2 Authentication options
+
+| `auth_type`        | How it works                                              |
+|--------------------|-----------------------------------------------------------|
+| `"none"`           | No authentication                                         |
+| `"bearer"`         | `Authorization: Bearer <token>` header                    |
+| `"api_key_header"` | Custom header (default `X-API-Key: <key>`)                |
+| `"api_key_query"`  | Query parameter (default `?api_key=<key>`)                |
+
+If `auth_value` starts with `$`, it is treated as an environment
+variable name — the token is read at runtime rather than stored in the
+template.
+
+### 5.3 Example: records-format API with bearer auth
+
+```{r generic-api-records}
+my_template <- api_stream_template(
+  api             = "generic",
+  coord_system    = "gps",
+  url             = "https://api.myprovider.io/sessions/{session}/gps",
+  auth_type       = "bearer",
+  auth_value      = "$GPS_API_TOKEN",   # read from env var
+  response_format = "records",
+  stream_time     = "timestamp",
+  stream_lat      = "lat",
+  stream_lng      = "lng",
+  stream_altitude = "alt",
+  stream_extra    = c(speed = "velocity_ms")
+)
+
+trace <- initiate(session = "SESSION_ID_123", template = my_template)
+```
+
+### 5.4 Example: columnar-format API nested inside a response wrapper
+
+```{r generic-api-columnar}
+my_template <- api_stream_template(
+  api             = "generic",
+  coord_system    = "gps",
+  url             = "https://api.myprovider.io/v2/tracks/{session}",
+  auth_type       = "api_key_query",
+  auth_value      = "$PROVIDER_KEY",
+  auth_param      = "key",
+  response_format = "columnar",
+  data_path       = "result.data",     # navigate to resp$result$data
+  stream_time     = "ts",
+  stream_lat      = "latitude",
+  stream_lng      = "longitude"
+)
+```
+
+### 5.5 Saving and reusing API templates
+
+```{r api-template-save}
+save_api_stream_template(my_template, path = "~/templates/my_provider.xml")
+
+# Load later — or pass the path directly to initiate()
+trace <- initiate(
+  session  = "SESSION_ID_123",
+  template = "~/templates/my_provider.xml"
+)
+```
+
+------------------------------------------------------------------------
+
+## 6. Enriching metadata after ingestion
+
+`initiate()` populates metadata automatically (session name, sampling
+rate, duration, source, etc.), but fields like player name, team, and
+sport are left blank — you fill those in with `set_metadata()`:
+
+```{r set-metadata}
+trace <- trace |>
+  set_metadata(
+    player_id   = "P42",
+    player_name = "Jade Haycraft",
+    team        = "Senior A",
+    sport       = "Ice Skating",
+    session_type = "Training"
+  )
+
+metadata_report(trace)
+```
+
+All keys you pass to `set_metadata()` are added (or updated) on the
+metadata list. The quality log records that ingestion happened but does
+not prevent you from adding metadata at any point in the pipeline.
+
+------------------------------------------------------------------------
+
+## 7. Batch processing — loading a folder of GPS files
+
+A common workflow is to process an entire match or training day where
+each player has their own file. The pattern below uses `purrr::map()`
+to apply the full ingestion pipeline over a folder, producing a list of
+`motion_trace` objects that can be analysed or exported together. Be careful here;
+memory usage can spiral out of control.
+
+### 7.1 Flat list of traces
+
+```{r batch-list}
+library(tidyverse)
+library(motiongrammar)
+
+# Load a shared template once
+my_template <- load_csv_template("~/templates/catapult_gps.xml")
+
+# Collect all CSV files in the session folder
+files <- list.files(
+  path       = "~/data/session_2024-09-14/",
+  pattern    = "\\.csv$",
+  full.names = TRUE
+)
+
+# Map over the files — each becomes a motion_trace
+traces <- map(files, \(f) {
+  initiate(session = f, template = my_template) |>
+    set_metadata(
+      player_name  = tools::file_path_sans_ext(basename(f)),
+      session_type = "Match"
+    )
+})
+
+names(traces) <- tools::file_path_sans_ext(basename(files))
+```
+
+------------------------------------------------------------------------
+
+## Quick reference
+
+| Source                   | `source =`           | When to use                                     |
+|--------------------------|----------------------|-------------------------------------------------|
+| CSV (auto-detect columns) | `"guess_csv"` / `"auto"` | Exploration and first look at a new file       |
+| CSV (explicit columns)    | `"manual_csv"`       | Stable column names, no saved template yet      |
+| CSV (locked schema)       | `"template_csv"`     | Production, reproducible, team pipelines        |
+| Catapult replay export    | `"catapult_replay"`  | Catapult-specific preamble format               |
+| GPX track file            | `"gpx"` / `"auto"`  | Consumer GPS devices, Garmin, Apple Watch       |
+| Strava API                | `"strava"`           | Activity data from the Strava platform          |
+| Any JSON REST API         | `"generic"`          | Custom tracking platform or in-house system     |
+
+The recommended template workflow for any repeated analysis:
+
+```
+guess_csv_template()   →   inspect & adjust   →   save_csv_template()
+                                                         ↓
+                               initiate(template = "my_device.xml")
+```
+
+This ensures that column parsing is deterministic, documented, and
+independent of heuristics — exactly what you need when the analysis will
+be reported, peer-reviewed, or run across many sessions.

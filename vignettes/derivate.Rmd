@@ -1,0 +1,290 @@
+---
+title: "Derivate: Computing Velocity, Acceleration, and Beyond"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Derivate: Computing Velocity, Acceleration, and Beyond}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width  = 7,
+  fig.height = 4,
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+```{r pipeline-setup, include=FALSE}
+devtools::load_all()
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Build through filtrate — we demonstrate derivate() here
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5)
+```
+
+`derivate()` computes time-series derivatives of a projected and filtered
+motion trace. It always produces `distance` and `heading`, and adds
+whichever of velocity, acceleration, angular velocity, jerk, and lateral
+G you request.
+
+------------------------------------------------------------------------
+
+## 1. Basic usage
+
+```{r basic}
+library(motiongrammar)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+trace_pre <- initiate(
+  session = '~/motiongrammar/data/example_gps_file_short.csv',
+  source  = 'catapult_replay'
+) |>
+  coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
+             drop_outliers = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5)
+
+trace <- trace_pre |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity"))
+
+names(trace)
+summary(trace[, c("velocity", "acceleration", "angular_velocity")])
+```
+
+------------------------------------------------------------------------
+
+## 2. Velocity
+
+Velocity is Euclidean displacement divided by elapsed time over the
+preceding window:
+
+```
+velocity = sqrt((x[i] - x[i-w])² + (y[i] - y[i-w])²) / (t[i] - t[i-w])
+```
+
+```{r velocity-ts}
+# Plot velocity time-series (only the GPS period)
+trace |>
+  filter(!is.na(f_x)) |>
+  ggplot(aes(x = unix_time, y = velocity)) +
+  geom_line(linewidth = 0.3, colour = "steelblue") +
+  labs(
+    title = "Velocity over time",
+    x     = "Unix time (s)",
+    y     = "Speed (m/s)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+------------------------------------------------------------------------
+
+## 3. Acceleration
+
+```{r acceleration-ts}
+trace |>
+  filter(!is.na(f_x)) |>
+  ggplot(aes(x = unix_time, y = acceleration)) +
+  geom_line(linewidth = 0.3, colour = "darkorange") +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
+  labs(
+    title = "Acceleration over time",
+    x     = "Unix time (s)",
+    y     = "Acceleration (m/s²)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+Typical ranges in field sport:
+
+| Context              | Range            |
+|----------------------|------------------|
+| Normal running       | −3 to +3 m/s²    |
+| High-intensity burst | ±4 to ±6 m/s²    |
+| Artefact (noise)     | > ±10 m/s²       |
+
+------------------------------------------------------------------------
+
+## 4. Angular velocity — measuring curvature
+
+Angular velocity is derived from heading using a finite difference with
+circular wrapping to handle the 360° → 0° boundary:
+
+```
+Δh = ((heading[i] - heading[i-w] + 180) %% 360) - 180
+angular_velocity = |Δh| / dt
+```
+
+Zero when running straight; high when changing direction sharply.
+
+```{r angular-ts}
+trace |>
+  filter(!is.na(f_x)) |>
+  ggplot(aes(x = unix_time, y = angular_velocity)) +
+  geom_line(linewidth = 0.3, colour = "mediumpurple") +
+  labs(
+    title = "Angular velocity over time",
+    x     = "Unix time (s)",
+    y     = "Angular velocity (°/s)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+### Angular velocity on the field trajectory
+
+Colouring the path by angular velocity reveals where the player turned:
+
+```{r angular-field, fig.height=5}
+trace |>
+  filter(!is.na(f_x), angular_velocity < 200) |>
+  ggplot(aes(x = f_x, y = f_y, colour = angular_velocity)) +
+  geom_path(linewidth = 1.2) +
+  coord_fixed() +
+  scale_colour_viridis_c(option = "plasma", begin = 0.1, end = 0.9) +
+  labs(
+    title  = "Trajectory coloured by angular velocity",
+    subtitle = "Bright = sharp turn; dark = straight running",
+    x      = "x (m)", y = "y (m)",
+    colour = "°/s"
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+------------------------------------------------------------------------
+
+## 5. All derivatives together
+
+```{r all-derivs, fig.height=7}
+trace |>
+  filter(!is.na(f_x)) |>
+  select(unix_time, velocity, acceleration, angular_velocity) |>
+  pivot_longer(-unix_time, names_to = "derivative", values_to = "value") |>
+  mutate(derivative = factor(derivative,
+    levels = c("velocity", "acceleration", "angular_velocity"),
+    labels = c("Velocity (m/s)", "Acceleration (m/s²)", "Angular velocity (°/s)")
+  )) |>
+  ggplot(aes(x = unix_time, y = value)) +
+  geom_line(linewidth = 0.3, colour = "steelblue") +
+  facet_wrap(~ derivative, ncol = 1, scales = "free_y") +
+  labs(title = "All derivatives", x = "Unix time (s)", y = NULL) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+------------------------------------------------------------------------
+
+## 6. The `window` argument
+
+The window controls how many frames span each finite difference. Larger
+windows average over more time (less noise, less temporal resolution).
+
+```{r window, eval=FALSE}
+# Uniform window: 5 frames at 10 Hz = 0.5 s differences
+trace <- trace_pre |> derivate(window = 5)
+
+# Per-derivative windows: velocity wider, acceleration narrower
+trace <- trace_pre |>
+  derivate(
+    window = list(
+      velocity         = 10,    # 1 s at 10 Hz
+      acceleration     =  5,    # 0.5 s
+      angular_velocity = 10
+    )
+  )
+```
+
+The default window equals the sample rate in Hz (10 frames at 10 Hz = 1-second differences),
+making the default consistent across different device sample rates.
+
+------------------------------------------------------------------------
+
+## 7. `use_filtered` and `speed_floor`
+
+```{r options, eval=FALSE}
+# Force raw coordinates — not recommended without a reason
+trace <- trace_pre |> derivate(use_filtered = FALSE)
+
+# Suppress heading below 0.2 m/s (very slow walk)
+trace <- trace_pre |> derivate(speed_floor = 0.2)
+```
+
+Below `speed_floor`, `heading` and `angular_velocity` are suppressed to
+avoid noise in direction measurements when the player is stationary.
+
+------------------------------------------------------------------------
+
+## 8. Signed angular velocity
+
+```{r signed-omega, eval=FALSE}
+# Retain sign: positive = left / counter-clockwise
+trace <- trace_pre |>
+  derivate(derivatives = "angular_velocity", signed_omega = TRUE)
+```
+
+Useful for quantifying movement asymmetry — e.g. more left turns than
+right in a particular drill pattern.
+
+------------------------------------------------------------------------
+
+## 9. Experimental: jerk and lateral G
+
+```{r experimental, eval=FALSE}
+# Third-order derivative — very sensitive to noise, use with caution
+trace <- trace_pre |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity", "jerk"))
+
+# Centripetal load proxy (v × ω_rad / g)
+trace <- trace_pre |>
+  derivate(derivatives = "all")
+```
+
+Both print a warning. Jerk and lateral G amplify GPS positional noise
+significantly and have limited validation in the sports science
+literature. Apply aggressive coordinate filtering (cutoff ≤ 1 Hz) if
+you need them.
+
+------------------------------------------------------------------------
+
+## 10. Reading the quality log
+
+```{r quality}
+quality_report(trace)
+```
+
+The derivate section records which coordinate source was used
+(`f_x`/`f_y` or raw), all window sizes, `speed_floor`, and
+`signed_omega`. It also logs the full algorithm formula for each
+derivative — copy these into a methods section for a publication.
+
+------------------------------------------------------------------------
+
+## Quick reference
+
+| Argument       | Default     | Purpose                                                      |
+|----------------|-------------|--------------------------------------------------------------|
+| `use_filtered` | `TRUE`      | Use `f_x`/`f_y` if available; fall back to raw with message  |
+| `derivatives`  | standard set | `"velocity"`, `"acceleration"`, `"angular_velocity"`, `"jerk"`, `"lateral_g"`, or `"all"` |
+| `window`       | sample rate Hz | Frames per finite difference; scalar or named list         |
+| `speed_floor`  | `0.5`       | m/s below which heading / angular velocity are suppressed    |
+| `signed_omega` | `FALSE`     | Retain sign in angular velocity (+ = CCW, − = CW)           |
