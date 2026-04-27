@@ -306,10 +306,8 @@ filtrate <- function(.data,
     call. = FALSE)
   }
 
-  # For coordinates target: ensure f_z exists even when z is absent
-  if (identical(target, 'coordinates') && !('z' %in% names(.data))) {
-    output[['f_z']] <- 0
-  }
+  # Do not create a spurious f_z column when z is absent from the data.
+  # Downstream derivate() only uses f_x and f_y, so no zero-fill is needed.
 
   # Preserve class and update metadata
   if (!inherits(output, 'motion_trace')) {

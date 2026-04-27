@@ -1702,11 +1702,15 @@ print.motion_trace <- function(x, ...){
 #' @param ... Additional arguments for manual_csv
 #' @export
 initiate <- function(source = 'auto',
-                     session = '17134112147',
+                     session = NULL,
                      coord_system = 'gps',
                      verbose = TRUE,
                      template = NULL,
                      ...){
+
+  if (is.null(session)) {
+    stop("initiate(): 'session' must be provided. Supply a file path (CSV/GPX) or a Strava activity ID.")
+  }
 
   # Resolve template: XML file path -> csv_template or api_stream_template
   if (is.character(template) && length(template) == 1) {

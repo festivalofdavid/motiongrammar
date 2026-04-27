@@ -269,10 +269,11 @@ interpolate <- function(.data,
   n_grid_rows <- nrow(full_seq)
 
   # track which rows already had NA coordinates (from coordinate QC)
-  # before we join the time grid -- these are NOT time gaps
+  # before we join the time grid -- these are NOT time gaps.
+  # Store as a temporary column so row order after arrange() doesn't matter.
   has_z <- 'z' %in% names(output)
-  coord_was_na <- is.na(output$x) | is.na(output$y) | (has_z & is.na(output$z))
-  n_coord_na <- sum(coord_was_na)
+  output$.coord_was_na <- is.na(output$x) | is.na(output$y) | (has_z & is.na(output$z))
+  n_coord_na <- sum(output$.coord_was_na)
 
   # join the two, and flag so we know which data points have been interpolated
   output <- output |>
@@ -292,11 +293,10 @@ interpolate <- function(.data,
     passthrough_na_counts <- setNames(integer(length(passthrough_cols)), passthrough_cols)
   }
 
-  # extend the coord_was_na flag to cover the newly inserted rows
-  # original rows keep their flag; inserted (time-gap) rows are FALSE
-  # because they are genuine gaps, not coordinate QC removals
-  coord_was_na_full <- rep(FALSE, nrow(output))
-  coord_was_na_full[!is.na(output$unix_time_orig)] <- coord_was_na
+  # Extend the coord_was_na flag to cover newly inserted rows.
+  # Original rows use the per-row column set before the join; inserted rows are FALSE.
+  coord_was_na_full <- !is.na(output$.coord_was_na) & output$.coord_was_na
+  output$.coord_was_na <- NULL
 
   # track which rows *needed* interpolation (time-gap inserts or upstream NA coords)
   needed_interp <- is.na(output$unix_time_orig) | coord_was_na_full

@@ -1,6 +1,6 @@
 Package: motiongrammar
 Title: Tidy tools to analyse tracking data
-Version: 0.1
+Version: 1.0.0
 Authors@R:
     person("David",
      "Corbett",
@@ -27,9 +27,12 @@ Imports:
     jsonlite,
     purrr,
     stringdist,
+    tidyr,
     uuid,
     rlang
 Suggests:
+    ggplot2,
+    patchwork,
     signal,
     testthat (>= 3.0.0)
 Collate:
