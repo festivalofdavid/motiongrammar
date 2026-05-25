@@ -167,15 +167,22 @@ initiate_guess_csv <- function(.data_path,
   }
 
   if(first_data_idx >= 2){
-    # Non-standard CSV: header lives in the preamble rows before the data block
-    potential_headers <- all_lines[1:(first_data_idx - 1)]
-    header_candidates <- which(stringr::str_detect(potential_headers, '[A-Za-z]'))
+    # If the first line of the data block contains letters it IS the header
+    # (standard device-export layout: preamble rows → header → data).
+    # Only fall back to the backward preamble search for the rare case where
+    # data rows have more commas than the header (e.g. trailing empty fields).
+    if(stringr::str_detect(all_lines[first_data_idx], '[A-Za-z]')){
+      header_idx <- first_data_idx
+    } else {
+      potential_headers <- all_lines[1:(first_data_idx - 1)]
+      header_candidates <- which(stringr::str_detect(potential_headers, '[A-Za-z]'))
 
-    if(length(header_candidates) == 0){
-      stop('Could not identify a valid header row.')
+      if(length(header_candidates) == 0){
+        stop('Could not identify a valid header row.')
+      }
+
+      header_idx <- utils::tail(header_candidates, 1)
     }
-
-    header_idx <- utils::tail(header_candidates, 1)
   } else {
     # Standard CSV: header is line 1, same comma count as data rows
     if(!stringr::str_detect(all_lines[1], '[A-Za-z]')){
@@ -188,7 +195,8 @@ initiate_guess_csv <- function(.data_path,
   raw_cols <- raw_header |>
     stringr::str_split(',') |>
     purrr::pluck(1) |>
-    stringr::str_trim()
+    stringr::str_trim() |>
+    stringr::str_remove_all('^"|"$')   # strip surrounding quotes from write.csv output
 
   clean_names <- raw_cols[raw_cols != '']
 
@@ -864,7 +872,7 @@ init_quality_log <- function(trace, source){
     }
   }
 
-  gap_percentage <- length(gaps) / length(time_diffs) * 100
+  gap_percentage <- if(length(time_diffs) > 0) length(gaps) / length(time_diffs) * 100 else 0
   if(gap_percentage > 5){
     issues <- c(issues, sprintf("High gap frequency: %d gaps (%.1f%% of intervals)",
                                 length(gaps), gap_percentage))
