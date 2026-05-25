@@ -241,7 +241,7 @@ records the source file path and column mapping used.
 ## Quick reference
 
 | Argument | Default | Purpose |
-|---------------|---------------|------------------------------------------|
+|----|----|----|
 | `method` | `"corbett"` | `"corbett"` (automatic) or `"manual"` (CSV import) |
 | `v_threshold` | `0.25` | m/s — mean below this = relief segment |
 | `min_pts` | `5 × hz` | Minimum rows per segment; tiny segments are merged |

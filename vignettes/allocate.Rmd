@@ -47,11 +47,20 @@ for each derivative that `quantitate()` uses to produce load profiles.
 
 ## 1. Why intensity bands?
 
-Raw velocity tells you what happened in each frame. Intensity bands let
-you ask what proportion of the session was spent in each loading zone —
-the core question behind GPS profiling in team sport. By specifying the
+Raw velocity tells you what happened in each frame. However, ultimately,
+we want to be able to answer questions such as:
+
+1.  How much of a players session was spent walking?
+2.  How much did a player spring during a session?
+
+To answer these questions, we set thresholds, and calculate things like
+efforts and total distances within these allocations. By specifying the
 same thresholds for every player and every session, you create a
 consistent, comparable taxonomy.
+
+Eventually, I'll add support for *Sweeting's Clustering Method* to
+actually determine where the cut off lies. But for version 1 of
+motiongrammar, the goal is to apply bands identified elsewhere.
 
 ------------------------------------------------------------------------
 
@@ -93,16 +102,16 @@ grep("band", names(trace), value = TRUE)
 
 A vector of N values creates N−1 bands:
 
-```
+```         
 velocity = c(0, 2, 4, 6, 8)
 ```
 
-| Band     | Range       | Typical label       |
-|----------|-------------|---------------------|
-| `band_1` | 0 – 2 m/s  | Walk                |
-| `band_2` | 2 – 4 m/s  | Jog                 |
-| `band_3` | 4 – 6 m/s  | Run                 |
-| `band_4` | 6+ m/s     | High-speed run      |
+| Band     | Range     | Arbitrary Label |
+|----------|-----------|-----------------|
+| `band_1` | 0 – 2 m/s | Walk            |
+| `band_2` | 2 – 4 m/s | Jog             |
+| `band_3` | 4 – 6 m/s | Run             |
+| `band_4` | 6+ m/s    | High-speed run  |
 
 Values above the highest threshold fall into the top band (open upper
 bound). Values below the lowest threshold become `NA`. Bands are stored
@@ -188,7 +197,7 @@ trace <- trace_pre |>
 
 **CSV format:**
 
-```csv
+``` csv
 profile_name,target_derivative,profile_start,profile_end
 gps_standard,velocity,0,2
 gps_standard,velocity,2,4
@@ -219,10 +228,10 @@ inline code or a CSV file.
 
 ## Quick reference
 
-| Argument         | Default          | Purpose                                    |
-|------------------|------------------|--------------------------------------------|
-| `allocation`     | Standard GPS set | Named list of threshold vectors            |
-| `allocation_name`| `"allocation_1"` | Prefix for the output band columns         |
+| Argument          | Default          | Purpose                            |
+|-------------------|------------------|------------------------------------|
+| `allocation`      | Standard GPS set | Named list of threshold vectors    |
+| `allocation_name` | `"allocation_1"` | Prefix for the output band columns |
 
 `allocate_csv()` — `file` is the only argument: path to a CSV with
 `profile_name`, `target_derivative`, `profile_start`, `profile_end`.

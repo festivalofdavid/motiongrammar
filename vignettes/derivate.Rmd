@@ -307,7 +307,7 @@ derivative — copy these into a methods section for a publication.
 ## Quick reference
 
 | Argument | Default | Purpose |
-|--------------|--------------|--------------------------------------------|
+|----|----|----|
 | `use_filtered` | `TRUE` | Use `f_x`/`f_y` if available; fall back to raw with message |
 | `derivatives` | standard set | `"velocity"`, `"acceleration"`, `"angular_velocity"`, `"jerk"`, `"lateral_g"`, or `"all"` |
 | `window` | sample rate Hz | Frames per finite difference; scalar or named list |

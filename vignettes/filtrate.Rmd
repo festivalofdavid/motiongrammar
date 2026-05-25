@@ -135,7 +135,7 @@ Attenuation (dB) = 20 × log10(output_amplitude / input_amplitude)
 ```
 
 | dB | What it means |
-|-----------------|-------------------------------------------------------|
+|----|----|
 | 0 dB | No change — signal passes unchanged |
 | −3 dB | Amplitude reduced to 70.7% — this is the standard definition of the cutoff frequency for Butterworth |
 | −20 dB | Amplitude reduced to 10% |
@@ -330,7 +330,7 @@ Standard in biomechanics (Winter, 2009).
 **Key parameters:**
 
 | Parameter | Guidance |
-|--------------------------------------|----------------------------------|
+|----|----|
 | `n` | Filter order. 2nd order gives 40 dB/decade rolloff with no ringing. |
 | `cutoff` | Must be between 0 and Nyquist (sample_rate / 2). |
 | `type` | `"low"` for noise removal (almost always). |
@@ -413,7 +413,7 @@ package versions for full reproducibility.
 ## Quick reference
 
 | Argument     | Default         | Purpose                                    |
-|-----------------|-----------------|--------------------------------------|
+|--------------|-----------------|--------------------------------------------|
 | `method`     | `"butterworth"` | Filter algorithm                           |
 | `target`     | `"coordinates"` | Signal(s) to filter                        |
 | `n`          | `2`             | Butterworth filter order                   |

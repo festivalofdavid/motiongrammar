@@ -173,7 +173,7 @@ ratio (\> 20–30%) is flagged as an issue.
 ## Quick reference
 
 | Argument | Default | Purpose |
-|----------------|----------------|-----------------------------------------|
+|----|----|----|
 | `method` | `"linear"` | `"linear"`, `"spline"`, or `"constant"` |
 | `hz` | from metadata | Target frame rate |
 | `max_gap_frames` | `5` | Gaps larger than this (frames) are left as NA |
