@@ -4,7 +4,14 @@
 \alias{quality_report}
 \title{Quality Report}
 \usage{
-quality_report(.data)
+quality_report(.data, step = NULL)
+}
+\arguments{
+\item{.data}{A \code{motion_trace} object.}
+
+\item{step}{Optional character vector of step name(s) to display, e.g.
+\code{"initiate"}, \code{c("elaborate", "allocate")}. \code{NULL}
+(default) shows all steps.}
 }
 \description{
 Quality Report

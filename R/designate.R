@@ -137,10 +137,15 @@ designate <- function(.data,
     labels <- .resolve_designation_cols(labels, cols)
 
     # Non-equi join: assign designation where unix_start <= unix_time <= unix_end
+    # NA times in either the data or the CSV would produce NA in the comparison,
+    # which R's vector assignment silently ignores — use which() to be explicit.
     .data$designation <- NA_character_
     for (i in seq_len(nrow(labels))) {
-      in_range <- .data$unix_time >= labels$unix_start[i] &
-                  .data$unix_time <= labels$unix_end[i]
+      in_range <- which(
+        !is.na(.data$unix_time) &
+        .data$unix_time >= labels$unix_start[i] &
+        .data$unix_time <= labels$unix_end[i]
+      )
       .data$designation[in_range] <- labels$designation[i]
     }
 
@@ -212,6 +217,10 @@ designate <- function(.data,
     meta$designation_method <- method
     meta$designation_source <- if (method == 'manual') file else 'computed'
     attr(refined, 'metadata') <- meta
+  }
+
+  if (!inherits(refined, 'motion_trace')) {
+    class(refined) <- c('motion_trace', class(refined))
   }
 
   return(refined)
@@ -379,8 +388,8 @@ export_designations <- function(.data, path = NULL) {
   summary_df <- .data |>
     dplyr::group_by(`.run_id`, designation) |>
     dplyr::summarise(
-      unix_start = min(unix_time, na.rm = TRUE),
-      unix_end   = max(unix_time, na.rm = TRUE),
+      unix_start = if (any(!is.na(unix_time))) min(unix_time, na.rm = TRUE) else NA_real_,
+      unix_end   = if (any(!is.na(unix_time))) max(unix_time, na.rm = TRUE) else NA_real_,
       .groups = 'drop'
     ) |>
     dplyr::arrange(unix_start) |>

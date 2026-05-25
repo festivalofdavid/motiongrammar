@@ -1,0 +1,37 @@
+{
+  "01_vendor_preamble_fuzzy_gps.csv": [
+    "Six-row vendor preamble",
+    "Fuzzy but English GPS column names",
+    "Missing coordinate chunk",
+    "Large temporal gap",
+    "One GPS teleportation spike",
+    "Extra columns to test csv_template(col_extra)"
+  ],
+  "02_iso_datetime_duplicate_times_mixed_na.csv": [
+    "ISO datetime strings rather than numeric unix time",
+    "Duplicate timestamp block",
+    "Mixed NA encodings: blank, NULL, N/A",
+    "Pre-computed vendor speed and acceleration columns"
+  ],
+  "03_local_xy_centimetres_no_gps.csv": [
+    "Local x/y/z rather than lat/lng",
+    "Unix timestamps in milliseconds",
+    "Coordinates are centimetres, not metres",
+    "Comment preamble rows",
+    "Missing local coordinate chunk",
+    "Large x/y spike"
+  ],
+  "04_duplicate_column_names_second_time_correct.csv": [
+    "Duplicate column names: Time and Load repeated",
+    "The second Time column is the correct 10 Hz time",
+    "The first Time column is wrong low-resolution time",
+    "Requires duplicate_method or integer-index template"
+  ],
+  "05_semicolon_decimal_comma_european_gps.csv": [
+    "Semicolon delimiter",
+    "Decimal comma instead of decimal point",
+    "Non-English column names",
+    "Preamble rows",
+    "Likely intended to fail unless importer supports delimiter/locale or file is pre-cleaned"
+  ]
+}

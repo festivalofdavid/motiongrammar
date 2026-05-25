@@ -171,7 +171,7 @@ initiate_guess_csv <- function(.data_path,
     # (standard device-export layout: preamble rows → header → data).
     # Only fall back to the backward preamble search for the rare case where
     # data rows have more commas than the header (e.g. trailing empty fields).
-    if(stringr::str_detect(all_lines[first_data_idx], '[A-Za-z]')){
+    if(stringr::str_detect(all_lines[first_data_idx], '^[A-Za-z_]')){
       header_idx <- first_data_idx
     } else {
       potential_headers <- all_lines[1:(first_data_idx - 1)]
@@ -604,7 +604,7 @@ validate_motion_trace <- function(.data, call = 'function', requires = character
     stop(
       call, '(): input must be a motion_trace object created by initiate(). ',
       'If a dplyr verb stripped the class, wrap the operation in elaborate() ',
-      'or ensure dplyr >= 1.0 is installed so dplyr_reconstruct() is active.'
+      'or ensure dplyr >= 1.1 and vctrs >= 0.6 are installed.'
     )
   }
 
@@ -628,21 +628,21 @@ validate_motion_trace <- function(.data, call = 'function', requires = character
   invisible(.data)
 }
 
-#' dplyr reconstruct method for motion_trace
+#' vctrs restore method for motion_trace
 #'
 #' Ensures that dplyr verbs (filter, slice, arrange, rename, etc.) preserve
-#' the motion_trace class and its metadata and quality attributes. Registered
-#' automatically when the package is loaded.
+#' the motion_trace class and its metadata and quality attributes.
 #'
-#' @param data The result of a dplyr operation.
-#' @param template The original motion_trace object.
+#' @param x The result of a dplyr operation.
+#' @param to The original motion_trace object.
 #' @keywords internal
+#' @importFrom vctrs vec_restore
 #' @export
-dplyr_reconstruct.motion_trace <- function(data, template) {
-  attr(data, 'metadata') <- attr(template, 'metadata')
-  attr(data, 'quality') <- attr(template, 'quality')
-  class(data) <- class(template)
-  data
+vec_restore.motion_trace <- function(x, to, ...) {
+  attr(x, 'metadata') <- attr(to, 'metadata')
+  attr(x, 'quality') <- attr(to, 'quality')
+  class(x) <- class(to)
+  x
 }
 
 #' Create Metadata
@@ -983,8 +983,12 @@ init_quality_log <- function(trace, source){
 }
 
 #' Quality Report
+#' @param .data A \code{motion_trace} object.
+#' @param step Optional character vector of step name(s) to display, e.g.
+#'   \code{"initiate"}, \code{c("elaborate", "allocate")}. \code{NULL}
+#'   (default) shows all steps.
 #' @export
-quality_report <- function(.data){
+quality_report <- function(.data, step = NULL){
 
   qual <- attr(.data, 'quality')
   meta <- attr(.data, 'metadata')
@@ -1007,8 +1011,24 @@ quality_report <- function(.data){
     cat("\n")
   }
 
-  steps <- names(qual)
-  cat(sprintf("Processing: %s\n\n", paste(steps, collapse = " → ")))
+  all_steps <- names(qual)
+  cat(sprintf("Processing: %s\n\n", paste(all_steps, collapse = " → ")))
+
+  steps <- if (!is.null(step)) {
+    unknown <- setdiff(step, all_steps)
+    if (length(unknown) > 0) {
+      warning("quality_report(): step(s) not found in quality log: ",
+              paste(unknown, collapse = ", "))
+    }
+    intersect(all_steps, step)
+  } else {
+    all_steps
+  }
+
+  if (length(steps) == 0) {
+    cat("No matching steps to display.\n")
+    return(invisible(qual))
+  }
 
   # Steps that store a list of run entries (one entry appended per call).
   # filtrate / allocate / elaborate use their own nested structures.
@@ -1446,10 +1466,27 @@ quality_report <- function(.data){
           cat("    Added:       (none)\n")
         }
 
-        if(length(e$modified) > 0){
-          cat(sprintf("    Modified:    %s\n", paste(e$modified, collapse = ', ')))
-        } else {
+        # Separate reserved overwrites from ordinary modifications
+        overwritten_res <- e$overwritten_reserved %||% character(0)
+        non_reserved    <- setdiff(e$modified, overwritten_res)
+
+        if(length(non_reserved) > 0){
+          cat(sprintf("    Modified:    %s\n", paste(non_reserved, collapse = ', ')))
+        } else if(length(overwritten_res) == 0){
           cat("    Modified:    (none)\n")
+        }
+
+        if(length(overwritten_res) > 0){
+          cat(sprintf("    ⚠ Overwrote: %s  [reserved pipeline column(s)]\n",
+                      paste(overwritten_res, collapse = ', ')))
+        }
+
+        if(!is.null(e$expressions) && length(e$expressions) > 0){
+          cat("    Expressions:\n")
+          for(col_name in names(e$expressions)){
+            cat(sprintf("      %-22s %s\n",
+                        paste0(col_name, ":"), e$expressions[[col_name]]))
+          }
         }
 
         cat("\n")
@@ -2115,10 +2152,17 @@ csv_template <- function(
     skip = 0L,
     max_empty_lines = 3L,
     comment = "#",
-    duplicate_method = c("return_error", "use_first", "use_second")
+    duplicate_method = c("return_error", "use_first", "use_second"),
+    delimiter = ",",
+    decimal = "."
 ) {
   coord_system <- match.arg(coord_system)
   duplicate_method <- match.arg(duplicate_method)
+
+  if (!is.character(delimiter) || nchar(delimiter) != 1)
+    stop("csv_template(): delimiter must be a single character (e.g. \",\", \";\", \"\\t\")")
+  if (!decimal %in% c(".", ","))
+    stop("csv_template(): decimal must be \".\" or \",\"")
 
   if (missing(col_unix) || is.null(col_unix))
     stop("csv_template(): col_unix is required")
@@ -2148,6 +2192,8 @@ csv_template <- function(
       max_empty_lines = as.integer(max_empty_lines),
       comment = as.character(comment),
       duplicate_method = duplicate_method,
+      delimiter = as.character(delimiter),
+      decimal = as.character(decimal),
       col_unix = col_unix,
       col_coord1 = col_coord1,
       col_coord2 = col_coord2,
@@ -2175,9 +2221,14 @@ print.csv_template <- function(x, ...) {
   }
 
   cat(sprintf("CSV Template [%s]\n", x$coord_system))
+  locale_str <- ""
+  delim <- x$delimiter %||% ","
+  dec   <- x$decimal   %||% "."
+  if (delim != "," || dec != ".")
+    locale_str <- sprintf("  |  delimiter: '%s'  |  decimal: '%s'", delim, dec)
   cat(sprintf(
-    "  skip: %d  |  max_empty_lines: %d  |  comment: '%s'  |  duplicate_method: %s\n",
-    x$skip, x$max_empty_lines, x$comment, x$duplicate_method
+    "  skip: %d  |  max_empty_lines: %d  |  comment: '%s'  |  duplicate_method: %s%s\n",
+    x$skip, x$max_empty_lines, x$comment, x$duplicate_method, locale_str
   ))
   cat("  Column mapping:\n")
   cat(sprintf("    unix_time <- %s\n", fmt_ref(x$col_unix)))
@@ -2234,6 +2285,8 @@ save_csv_template <- function(template, path) {
     add_tag("max_empty_lines", template$max_empty_lines),
     add_tag("comment",         template$comment),
     add_tag("duplicate_method", template$duplicate_method),
+    add_tag("delimiter",       template$delimiter %||% ","),
+    add_tag("decimal",         template$decimal   %||% "."),
     "  <columns>",
     add_tag("col_unix",         template$col_unix,         "    "),
     add_tag("col_coord1",       template$col_coord1,       "    "),
@@ -2343,6 +2396,8 @@ load_csv_template <- function(path) {
   max_empty_lines <- as.integer(get_tag("max_empty_lines", content) %||% "3")
   comment <- get_tag("comment",         content) %||% "#"
   duplicate_method <- get_tag("duplicate_method", content) %||% "return_error"
+  delimiter <- get_tag("delimiter", content) %||% ","
+  decimal   <- get_tag("decimal",   content) %||% "."
 
   # col_* values may be integer indices or column names
   col_unix <- .parse_col_ref(get_tag("col_unix",         cols_section))
@@ -2366,6 +2421,8 @@ load_csv_template <- function(path) {
       max_empty_lines = max_empty_lines,
       comment = comment,
       duplicate_method = duplicate_method,
+      delimiter = delimiter,
+      decimal = decimal,
       col_unix = col_unix,
       col_coord1 = col_coord1,
       col_coord2 = col_coord2,
@@ -2563,9 +2620,13 @@ initiate_template_csv <- function(.data_path, template) {
   if (length(data_lines) < 2)
     stop("csv_template: no data rows found after skip and blank-row trimming")
 
+  delim <- template$delimiter %||% ","
+  dec   <- template$decimal   %||% "."
+
   df <- suppressWarnings(
-    readr::read_csv(
+    readr::read_delim(
       I(paste(data_lines, collapse = "\n")),
+      delim = delim,
       show_col_types = FALSE,
       col_types = readr::cols(.default = readr::col_character()),
       name_repair = "minimal"   # preserve duplicate column names for duplicate_method
@@ -2574,6 +2635,12 @@ initiate_template_csv <- function(.data_path, template) {
 
   if (nrow(df) == 0)
     stop("csv_template: no data rows found after parsing")
+
+  # Helper: substitute decimal separator then coerce to numeric
+  parse_num <- function(x) {
+    if (dec != ".") x <- gsub(dec, ".", x, fixed = TRUE)
+    suppressWarnings(as.numeric(x))
+  }
 
   all_cols <- colnames(df)
   col_lower <- stringr::str_to_lower(all_cols)
@@ -2621,28 +2688,30 @@ initiate_template_csv <- function(.data_path, template) {
   else
     c("unix_time", "x", "y", "z")
 
+  # Pre-process unix column for non-standard decimal before convert_to_unix
+  unix_raw <- df[[unix_idx]]
+  if (dec != ".") unix_raw <- gsub(dec, ".", unix_raw, fixed = TRUE)
+
   # Build output tibble with standard columns (access by integer index)
   output <- tibble::tibble(
-    unix_time = convert_to_unix(df[[unix_idx]]),
-    coord1 = suppressWarnings(as.numeric(df[[coord1_idx]])),
-    coord2 = suppressWarnings(as.numeric(df[[coord2_idx]])),
-    coord3 = if (!is.null(coord3_idx))
-      suppressWarnings(as.numeric(df[[coord3_idx]]))
-    else NA_real_
+    unix_time = convert_to_unix(unix_raw),
+    coord1 = parse_num(df[[coord1_idx]]),
+    coord2 = parse_num(df[[coord2_idx]]),
+    coord3 = if (!is.null(coord3_idx)) parse_num(df[[coord3_idx]]) else NA_real_
   )
   colnames(output) <- std_names
 
   # Pre-computed velocity / acceleration
   if (!is.null(vel_idx))
-    output[["velocity"]] <- suppressWarnings(as.numeric(df[[vel_idx]]))
+    output[["velocity"]] <- parse_num(df[[vel_idx]])
 
   if (!is.null(acc_idx))
-    output[["acceleration"]] <- suppressWarnings(as.numeric(df[[acc_idx]]))
+    output[["acceleration"]] <- parse_num(df[[acc_idx]])
 
   # Extra columns: try numeric, fall back to character if mostly NA
   for (er in extra_resolved) {
     raw <- df[[er$idx]]
-    num_attempt <- suppressWarnings(as.numeric(raw))
+    num_attempt <- parse_num(raw)
     output[[er$name]] <- if (mean(is.na(num_attempt)) <= 0.5) num_attempt else raw
   }
 

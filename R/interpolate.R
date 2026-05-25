@@ -22,7 +22,14 @@
 #' @param gap_lengths Integer vector; lengths of each consecutive NA run (pre-interpolation).
 #' @param passthrough_na_counts Named integer vector; for each non-coordinate column present
 #'   in the input, the number of NAs introduced in time-gap rows inserted by grid expansion.
+#' @param passthrough_na_counts_after Named integer vector; NAs remaining per passthrough
+#'   column after interpolation (numeric columns will have fewer than before; non-numeric
+#'   columns will match the introduced count).
 #' @param cols_before Character vector; column names of the input before interpolation.
+#' @param numeric_passthrough Character vector; non-coordinate columns that are numeric and
+#'   were interpolated alongside coordinates.
+#' @param non_numeric_passthrough Character vector; non-coordinate columns that are
+#'   character/factor and were left as-is (NAs remain for inserted time-gap rows).
 #' @return The motion_trace object with updated quality attribute.
 #' @keywords internal
 interp_quality_log <- function(output, method, hz, max_gap_frames,
@@ -31,7 +38,10 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
                                 n_filled_x, n_filled_y, n_filled_z,
                                 n_remaining_na_x, n_remaining_na_y,
                                 gap_lengths, passthrough_na_counts = integer(0),
-                                cols_before = NULL) {
+                                passthrough_na_counts_after = integer(0),
+                                cols_before = NULL,
+                                numeric_passthrough = character(0),
+                                non_numeric_passthrough = character(0)) {
 
   qual <- attr(output, 'quality')
   if (is.null(qual)) qual <- list()
@@ -159,18 +169,27 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
     filled = list(x = n_filled_x, y = n_filled_y, z = n_filled_z),
     remaining_na = list(x = n_remaining_na_x, y = n_remaining_na_y),
 
-    # Passthrough columns (non-coordinate columns not interpolated)
+    # Passthrough columns — numeric ones are interpolated; non-numeric are left as-is
     passthrough_columns = if (length(passthrough_na_counts) > 0) {
       list(
         note = paste0(
-          "Only x/y/z coordinates are interpolated. Non-coordinate columns are carried ",
-          "through as-is: ", n_time_gaps, " row(s) inserted to fill time gaps receive NA ",
-          "for all passthrough columns."
+          "x/y/z and numeric passthrough columns are interpolated. ",
+          "Non-numeric columns (character, factor) are carried through as-is: ",
+          n_time_gaps, " row(s) inserted to fill time gaps receive NA for non-numeric columns."
         ),
-        na_counts_from_gaps = as.list(passthrough_na_counts)
+        interpolated        = numeric_passthrough,
+        skipped_non_numeric = non_numeric_passthrough,
+        na_counts_from_gaps = as.list(passthrough_na_counts),
+        na_counts_remaining = as.list(passthrough_na_counts_after)
       )
     } else {
-      list(note = "No passthrough columns present.", na_counts_from_gaps = list())
+      list(
+        note                = "No passthrough columns present.",
+        interpolated        = character(0),
+        skipped_non_numeric = character(0),
+        na_counts_from_gaps = list(),
+        na_counts_remaining = list()
+      )
     },
 
     # Issues
@@ -252,9 +271,15 @@ interpolate <- function(.data,
   n_duplicates_removed <- n_before_dedup - nrow(output)
 
   # Capture passthrough columns before grid expansion.
-  # Only x/y/z are interpolated; every other column gets NAs for inserted time-gap rows.
-  interp_coord_cols <- c('x', 'y', 'z', 'unix_time', 'unix_time_orig', 'is_interpolated')
-  passthrough_cols  <- setdiff(names(output), interp_coord_cols)
+  # Numeric non-coordinate columns (e.g. HeartRate) are interpolated alongside x/y/z.
+  # Non-numeric columns (character, factor) are carried through as-is — zoo functions
+  # cannot handle them and will crash with a cryptic vector-type error if attempted.
+  interp_coord_cols    <- c('x', 'y', 'z', 'unix_time', 'unix_time_orig', 'is_interpolated')
+  passthrough_cols     <- setdiff(names(output), interp_coord_cols)
+  numeric_passthrough  <- passthrough_cols[
+    vapply(passthrough_cols, function(col) is.numeric(output[[col]]), logical(1))
+  ]
+  non_numeric_passthrough <- setdiff(passthrough_cols, numeric_passthrough)
 
   # this is our dense grid-- so gapless.
   # Round the seq() output to the same hz-grid precision as the input timestamps
@@ -326,10 +351,28 @@ interpolate <- function(.data,
     stop("Invalid method. Choose 'spline', 'linear', or 'constant'.")
   )
 
-  # Count NAs after interpolation
+  # Interpolate numeric passthrough columns (e.g. HeartRate, Cadence) using the same method.
+  # Non-numeric columns (character, factor) are intentionally skipped.
+  if (length(numeric_passthrough) > 0) {
+    zoo_fn <- switch(method,
+      'linear'   = \(col) zoo::na.approx(col, na.rm = FALSE, maxgap = max_gap_frames),
+      'spline'   = \(col) zoo::na.spline(col, na.rm = FALSE, maxgap = max_gap_frames),
+      'constant' = \(col) zoo::na.locf(col, na.rm = FALSE, maxgap = max_gap_frames)
+    )
+    output <- output |>
+      dplyr::mutate(dplyr::across(dplyr::all_of(numeric_passthrough), zoo_fn))
+  }
+
+  # Count NAs remaining after all interpolation (coordinates + numeric passthrough)
   na_x_after <- sum(is.na(output$x))
   na_y_after <- sum(is.na(output$y))
   na_z_after <- if (has_z) sum(is.na(output$z)) else 0L
+
+  passthrough_na_counts_after <- if (length(passthrough_cols) > 0L) {
+    vapply(passthrough_cols, function(col) sum(is.na(output[[col]])), integer(1))
+  } else {
+    setNames(integer(0), character(0))
+  }
 
   # is_interpolated = row needed filling AND coordinates are now present
   # rows that still have NA coords (gap too large, edges, no valid lat/lng) stay FALSE
@@ -357,9 +400,12 @@ interpolate <- function(.data,
     n_filled_z         = na_z_before - na_z_after,
     n_remaining_na_x   = na_x_after,
     n_remaining_na_y   = na_y_after,
-    gap_lengths           = gap_lengths,
-    passthrough_na_counts = passthrough_na_counts,
-    cols_before           = cols_before
+    gap_lengths             = gap_lengths,
+    passthrough_na_counts       = passthrough_na_counts,
+    passthrough_na_counts_after = passthrough_na_counts_after,
+    cols_before                 = cols_before,
+    numeric_passthrough         = numeric_passthrough,
+    non_numeric_passthrough     = non_numeric_passthrough
   )
 
   return(output)

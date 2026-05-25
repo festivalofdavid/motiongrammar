@@ -21,475 +21,615 @@ knitr::opts_chunk$set(
 )
 ```
 
-This vignette walks through the full **motiongrammar** pipeline — from a
-raw CSV of latitude and longitude, to a cleaned, filtered, segmented,
-and summarised motion trace.
+*motiongrammar* brings GPS, RFID, and optical tracking data into a
+single tidyverse-style pipeline. Within one chain of commands, we can
+transform our raw tracking data into aggregate summary tables. This
+includes transforming from (latitude,longitude) to (x,y), applying
+filters to attenuate noise, calculating custom time-series, and applying
+bands and identifying periods. Along the way, *motiongrammar* keeps a
+log of everything you have done to the dataset to maximise
+reproducibility.
 
-The pipeline reads left-to-right:
+```{r pipeline-hook, eval=FALSE}
+library(motiongrammar)
+library(tidyverse)
 
-```         
-initiate → coordinate → interpolate → filtrate → derivate → filtrate (derivatives)
-         → designate → elaborate → allocate → quantitate
+exemplar_trace <- initiate(
+    session  = "gps_session.csv",
+    template = load_csv_template("my_device.xml")
+  ) |>
+  coordinate(norm = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 0.4) |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity")) |>
+  designate(method = "manual", file = "drill_labels.csv") |>
+  elaborate(velocity = pmin(velocity, 8),
+            angular_velocity = pmin(abs(angular_velocity), 360),
+            curved_load = velocity * angular_velocity) |>
+  allocate_csv(file = "intensity_bands.csv")
+```
+
+That's the complete pipeline. The rest of this guide walks through each
+step with a real GPS session, explaining what each function does, how to
+tune it, and what to watch out for.
+
+------------------------------------------------------------------------
+
+```{r load, include=FALSE}
+library(motiongrammar)
+library(tidyverse)
+
+path <- system.file("data", "marquee_gps_file.csv", package = "motiongrammar")
 ```
 
 ------------------------------------------------------------------------
 
-## 0. Setup
+## A. Guess — let motiongrammar figure out the file type
 
-First we need to install motiongrammar. This package is not on CRAN, so
-we run the following (only need to do this once):
+`initiate(source = "guess_csv")` takes it's best shot at working out our
+csv format automatically. We would not use this in a pipeline as it is
+not standardised. But it is useful to quickly identify column names
+using fuzzy logic, and handles issues we sometimes see with vendors with
+empty rows/rows that need to be skipped etc.
 
-```{r}
-devtools::load_all()
+```{r initiate-guess}
+exemplar_trace <- initiate(source = "guess_csv", 
+               session = path, 
+               verbose = FALSE)
+
+exemplar_trace
 ```
 
-First, let's load in the packages we will use for this vignette.
+A key feature of motiongrammar is the *quality report*. It:
 
-```{r load}
-require(motiongrammar)
-require(tidyverse)
+1.  Keeps trace of every transformation you do on the data, whether it
+    be a calculation, filter or coordinate change (important in the
+    academic world and for debugging!)
+2.  Calls out anything that may be an error or issue in the data set.
+    Quality errors are not always glaring issues that need to be
+    addressed. They are just nudges that something may be amiss.
+
+The quality report updates automatically at every step. Later on, we
+will look at how to examine quality for a single step only.
+
+```{r quality-report-1}
+quality_report(exemplar_trace)
+```
+
+> The 14-second temporal gap and duplicate timestamps are real features
+> of this export. The quality system catches them automatically.
+
+------------------------------------------------------------------------
+
+## B. Inspect the detected template
+
+`guess_csv` only imports the four core columns (time, lat, lng,
+altitude). In the real world, you may want to keep vendor specific
+series' like metabolic power or player load `guess_csv_template()` shows
+exactly what was detected and allows us to extend it.
+
+```{r guess-template}
+my_csv_template <- guess_csv_template(path)
+my_csv_template
+```
+
+Add the device-specific extra columns, then save the template. Once
+saved, you can import a device format consistently. As a result, the
+prior inspection and this step are ideally a one-off. Vendors sometimes
+change formats, so in your own pipeline, it is important to keep
+everything you have set to identify where changes are coming from.
+
+NB: in camera systems, you may use frame as unix time. This is totally
+fine.
+
+```{r build-template}
+my_csv_template <- csv_template(
+  col_unix = "UnixTimestamp",
+  col_lat = "Latitude",
+  col_lng = "Longitude",
+  col_altitude = "Elevation",
+  col_extra = c("HeartRate", "PlayerLoad", "MetabolicPower", "Cadence"),
+  skip = 6L
+)
+
+template_path <- file.path(tempdir(), "marquee_gps_template.xml")
+save_csv_template(my_csv_template, template_path)
+```
+
+Reload at any time (from another script, a different machine, years
+later). After your first pass, *this* should be how you initiate a
+motiongrammar pipeline.
+
+```{r reload-template}
+my_csv_template <- load_csv_template(template_path)
 ```
 
 ------------------------------------------------------------------------
 
-## 1. Initiate — load the CSV
+## 1. Initiate — import with the template
 
-*motiongrammar* is compatible with:
-
--   csv files
-
--   gpx files
-
--   API streams
-
-For our quickstart, however, let's use a synthetic GPS file to
-demonstrate the "guess" functionality of *motiongrammar*. The guess
-algorithm:
-
-1.  determines where timestamp, latitude and longitude lie
-2.  Cleans out any additional rows or columns
-
-In a prod workflow, we would use the template functionality (covered
-elsewhere) to ensure everything is read in a standardised way. The
-template method also allows the user to save custom extensions, for
-example PlayerLoad or MetabolicPower, which by default are ignored by
-the *guess* method.
-
-```{r initiate}
-trace <- initiate(session = '~/motiongrammar/data/example_gps_file_short.csv',
-                  method = 'guess')
-
+```{r initiate-template}
+exemplar_trace <- initiate(session = path, 
+                           template = my_csv_template,
+                           verbose = FALSE)
+exemplar_trace
 ```
 
-Now we have initiated a motiongrammar object. This is comprised of:
-
-1.  The data itself – unix_time, lat, lng, altitude, is_interpolayed.
-2.  metadata - rather than storing metadata in every column, we save it
-    as a memory efficient object. An example of this is shown below. We
-    can access this using "metadata_report"
-
-```{r metadata}
-metadata_report(trace)
-```
-
-3.  quality - in academic settings, we want to preserve every
-    transformation done on the dataset. *quality* does this
-    automatically, and populates with how the data has changed at every
-    step in *motiongrammar*. It also flags any major red flags in the
-    data set. We can access this using "quality_report"
-
-```{r quality }
-quality_report(trace)
-```
+HeartRate, PlayerLoad, MetabolicPower, and Cadence are now columns that
+will carry through every downstream step.
 
 ------------------------------------------------------------------------
 
-## 2. Coordinate — project lat/lng to metres
+## 4. Coordinate — project to metres
 
-GPS data is spherical (degrees). `coordinate()` projects it to a flat
-Cartesian plane so that distances, velocities, and headings are in
-metres and m/s.
-
-`norm = TRUE` shifts the origin so the player's first recorded position
-is (0, 0). This makes trajectories easier to plot and interpret.
-`drop_outliers = TRUE`drops data points well outside of range of the
-rest of the data. So for example, if a player goes into the locker room
-at half time.
-
-This step also supports conversions between metric and imperial systems
-(but by default, we use the SI metric).
+GPS coordinates are spherical (degrees). `coordinate()` projects them to
+a flat Cartesian plane so distances, velocities, and headings are in
+metres. `norm = TRUE` places the first position at the origin. Check out
+the documentation on coordinate to see what your other options are.
+motiongrammar has methods to handle automatic and manual origins.
 
 ```{r coordinate}
-trace <- trace |>
-  coordinate(from = "latlong",
-    to = "xyz",
-    crs = 3857,
-    norm = TRUE,
-    drop_outliers = TRUE)
+exemplar_trace <- coordinate(exemplar_trace, norm = TRUE)
 ```
 
-Let's do a quick plot of our data as a sanity check:
+Let's plot what we have so far. In the figure below, we can see that the
+player returned to the locker room or GPS signal dropped out causing a
+spike. This is a very common scenario, and something we will handle in
+this quickstart.
 
-```{r}
-trace |> 
-ggplot(aes(x = x, y = y)) +
-  geom_path(alpha = 0.4, 
+```{r plot-raw-path}
+ggplot(exemplar_trace, aes(x, y)) +
+  geom_path(alpha = 0.6, 
             linewidth = 0.4) +
   coord_fixed() +
-  labs(title = "Raw projected trajectory (before interpolation)", 
-       x = "x (m)",
-       y = "y (m)") +
+  labs(title = "Projected trajectory (before interpolation)",
+       x = "x (m)", y = "y (m)") +
   theme_minimal() +
   theme(panel.grid = element_blank())
-
 ```
 
 ------------------------------------------------------------------------
 
-## 3. Interpolate — fill dropouts at the target frame rate
+## 5. Interpolate — regularise the frame rate
 
-GPS data drops out - interpolate handles this, if the provider has not
-already! `interpolate()` builds a dense time grid at `hz` frames per
-second and fills any gaps shorter than `max_gap_frames` using the chosen
-method. The logic here is that, a drop out above max_gap_frames is not
-just poor signal, but the battery dying (or the player being in the
-locker room for example)
+GPS signals drop out. `interpolate()` builds a regular 10 Hz time grid
+and fills short gaps linearly. Gaps longer than `max_gap_frames` rows
+are left as `NA` rather than invented — preserving the 14-second gap
+flagged earlier.
+
+Advanced users may be interested in the other methods offered here,
+albeit, they are less mainstream.
 
 ```{r interpolate}
-trace <- trace |>
-  interpolate(
-    method = "linear",
-    hz = 10,
-    max_gap_frames = 20  # gaps > 2 s are left as NA
-  )
+exemplar_trace <- interpolate(exemplar_trace, 
+                              hz = 10, 
+                              method = "linear", 
+                              max_gap_frames = 20)
 ```
 
 ------------------------------------------------------------------------
 
-## 4.0 Finding the cutoff frequency — coordinates
+## 6. Filtrate — smooth the coordinates
 
-Most providers handle filtering for us. But in an academic setting, this
-is something we need to check and sometimes do ourselves.
-*motiongrammar* includes functionality to easily identify cutoff
-frequency for a low pass butterworth filter using two methods:
+Your vendor has likely filtered your data for you, so you may not even
+need this step. If you get a tiny cut off (less than 0.5), it's likely
+your work has already been done for you. In saying that, filtering may
+be necessary and is an important skill as a biomechanist, so it's
+included here.
 
-**Residual analysis** (Winter, 2009): sweeps a range of cutoffs, applies
-the filter at each, and plots the RMS of the residuals (raw − filtered).
-The elbow of the curve marks where adding more smoothing removes real
+### Find the cutoff
+
+We will go into the theory behind this in a later text. But for the time
+being, you just need to know the following:
+
+1.  A low pass butterworth filter is what is usually used to smooth
+    human movement data.
+2.  The goal is to attenuate (or weaken) noise, not abruptly remove it.
+3.  We need to identify a cut-off that marks the trade off between
+    attenuating the noise in a signal, without removing real motion
+    data.
+
+`filtrate_cutoff()` sweeps a range of Butterworth cutoffs and plots the
+residual curve. The elbow marks where smoothing starts removing real
 signal rather than noise.
 
-**Power Spectral Density (PSD)**: shows how power is distributed across
-frequencies. Signal energy typically concentrates below a threshold;
-noise is relatively flat above it.
-
-```{r cutoff-coordinates, fig.height=5}
+```{r filtrate-cutoff, fig.height=5}
 filtrate_cutoff(
-  trace,
+  exemplar_trace,
   method = "butterworth",
   target = "coordinates",
-  axis = "x", # analyse the x axis; repeat for y if desired
-  plot_type = "both", # show residual curve and PSD side-by-side
+  axis = "x",
+  plot_type = "both",
   cutoff_range = c(0.1, 4),
-  n_steps = 60
+  n_steps = 40
 )
 ```
 
-The dashed red line is the suggested cut off (maximum curvature of the
-residual curve). Use it as a starting point and adjust based on the PSD.
+A cutoff of **\~1–2 Hz** is typical for GPS position data at 10 Hz. The
+dashed red line is the suggested value — adjust based on the PSD panel.
 
-A cutoff of **\~1–2 Hz** is typical for GPS-derived position data at 10
-Hz. Higher cutoffs retain more of the true path shape; lower cutoffs are
-appropriate when GPS noise is severe.
+We can tell this data is already filtered because the filter is very
+small. Another indicator that filtering has adequetely been performed by
+the vendor, is seeing more of a "straight line" than an elbow.
 
-------------------------------------------------------------------------
+For the purpose of educating, I'm going to utilise the suggested 0.4 cut
+off. In the real world, I'd probably just work off unfiltered
+coordinates (which motiongrammar also supports!)
 
-## 4.5 Filtrate — smooth the coordinates
+### Apply the filter
 
-Now we actually apply a 2nd-order zero-phase Butterworth low-pass filter
-at the chosen cutoff. The filtered coordinates are stored in new `f_x`,
-`f_y` columns; `derivate()` will use these by default.
+`filtrate()` stores the smoothed signal in `f_x`, `f_y` columns and
+leaves the originals untouched. Future steps will use the filtered
+coordinates by default, but we can change this.
 
-```{r filtrate-coordinates}
-trace <- trace |>
-  filtrate(method = "butterworth",
-    target = "coordinates",
-    n = 2, # filter order
-    cutoff = 1.5, # Hz — chosen from the analysis above
-    type = "low")
+You'll also note that there is a "target" argument here. Whether to
+filter coordinates (as we have done) or derivatives (velocity, angular
+velocity and acceleration) is a bit of a debate in biomechanics. Given
+that coordinates are more common (and library only one filter, versus
+separate cut offs for angular velocity, acceleration and velocity)
+that's what I typically work off.
 
+```{r filtrate}
+exemplar_trace <- filtrate(exemplar_trace, 
+                           method = "butterworth", 
+                           target = "coordinates",
+                           cutoff = 0.4)
 ```
 
-Below, we compare filtered versus recorded data. This data has clearly
-already been filtered by the provider, so we see minimal differences
-between filtered versus actual.
+Let's visualise what we have done so far:
 
-```{r}
-# Compare raw vs filtered on a short window
-trace |> 
-  drop_na(f_x) |> 
-ggplot(aes(x = unix_time)) +
-  geom_line(aes(y = x, 
-                colour = "Raw")) +
-  geom_line(aes(y = f_x,
-                colour = "Filtered")) +
-  scale_colour_manual(values = c(Raw = "firebrick2", 
-                                 Filtered = "dodgerblue")) +
-  labs(title = "x coordinate - filtered versus actual",
-       x = "Unix time (s)", 
-       y = "x (m)", 
-       colour = NULL) +
+```{r plot-filtered}
+exemplar_trace |> 
+drop_na(f_x) |>
+  ggplot(aes(x = unix_time)) +
+  geom_line(aes(y = x,
+                colour = "Raw"),
+            linewidth = 0.3) +
+  geom_line(aes(y = f_x, colour = "Filtered"), 
+            linewidth = 0.5) +
+  scale_colour_manual(values = c(Raw = "#D55E00", 
+                                 Filtered = "#0072B2")) +
+  labs(title = "x coordinate: raw vs filtered",
+       x = "Unix time (s)", y = "x (m)", colour = NULL) +
   theme_minimal() +
   theme(panel.grid = element_blank())
 ```
 
+We see some minor differences, but overall the small cut off led to a
+very forgiving filter.
+
 ------------------------------------------------------------------------
 
-## 5. Derivate — velocity, acceleration, angular velocity
+## 7. Derivate — velocity, acceleration, angular velocity
 
-`derivate()` computes derivatives using central differences over a
-rolling window. By default it uses the filtered `f_x` / `f_y` columns.
-
-Velocity and acceleration are fairly standard here, but angular_velocity
-is something I wanted to add leading on from Alice Sweeting's PhD. It
-provides a continuous time-series of whether a player is running in a
-straight or curved line.
+`derivate()` computes derivatives using central differences. It uses the
+filtered `f_x`, `f_y` columns by default.
 
 ```{r derivate}
-trace <- trace |>
-  derivate(use_filtered = TRUE,
-    derivatives = c("velocity", 
-                    "acceleration", 
-                    "angular_velocity")
-  )
-
-summary(trace[, c("velocity", "acceleration", "angular_velocity")])
+exemplar_trace <- derivate(
+  exemplar_trace,
+  use_filtered = TRUE,
+  derivatives = c("velocity", "acceleration", "angular_velocity")
+)
 ```
 
-We can look at angular velocity as a time-series
+You are probably familiar with velocity and acceleration. Angular
+velocity captures whether the player is running straight or turning as a
+continuous signal. Hats off to *Alice Sweeting* and co for her use of
+this in netball (we should all be using this more ;))
 
-```{r ts_angularvelocity}
-trace |> 
-  drop_na(angular_velocity) |> 
-ggplot(aes(x = unix_time, 
-           y = angular_velocity)) +
-  geom_line(linewidth = 0.3, 
-            colour = "black") +
-  labs(title = "Angular Velocity", 
-       x = "Time (s)", 
-       y = "Angular Velocity (deg/s)") +
+```{r plot-angular-velocity}
+drop_na(exemplar_trace, angular_velocity) |>
+  ggplot(aes(f_x, f_y, colour = angular_velocity)) +
+  geom_path(linewidth = 1) +
+  coord_fixed() +
+  scale_colour_viridis_c(option = "viridis", begin = 0.1, end = 0.9) +
+  labs(title = "Angular velocity mapped onto trajectory",
+       x = "x (m)", y = "y (m)", colour = "deg/s") +
   theme_minimal() +
   theme(panel.grid = element_blank())
 ```
 
-Or as co-ordinates. Here, notice how when a player changes direction, it
-is picked up by angular velocity:
-
-```{r field_angularvelocity}
-trace |> 
-  drop_na(angular_velocity) |> 
-ggplot(aes(x = f_x,
-           y = f_y,
-           color = angular_velocity,
-           fill = angular_velocity)) +
-  geom_path(linewidth = 1.5) +
-  labs(title = "Angular Velocity", 
-       x = "filtered x", 
-       y = "filtered y") +
-  theme_minimal() +
-  theme(panel.grid = element_blank())+
-    scale_color_viridis_c(option = "viridis",
-    begin = 0.1,
-    end   = 0.9)
-```
+> **GPS artefact — player off field.** The extreme angular velocity
+> values visible at one edge of the trajectory are not biomechanical.
+> The 14-second gap flagged by `initiate` in step 1 corresponds to the
+> player leaving the field (rotation, changing a shirt). GPS continued
+> recording at an off-field position, then snapped back when the player
+> returned — producing a position jump that `derivate()` reads as
+> extreme velocity and angular velocity. This is a real-world data
+> problem that the quality log flags but cannot automatically clean; we
+> address it explicitly in step 9.
 
 ------------------------------------------------------------------------
 
-## 6. If desired, you can filter derivatives as opposed to coordinates.
+## 8. Designate — identify activity bouts
 
-Whether to filter on a coordinates or derivatives is a debate in
-biomechanics, so I decided to offer both. So let's take a brief
-interlude to look at how we might determine cut off frequency on
-velocity instead of co-ordinates.
+### 8a. Automated segmentation — and generating a skeleton
 
-```{r cutoff-velocity, fig.height=5}
-filtrate_cutoff(trace,
-  method = "butterworth",
-  target = "velocity",
-  plot_type = "both",
-  cutoff_range = c(0.1, 4),
-  n_steps = 60)
+`designate()` uses PELT changepoint detection on the velocity signal to
+split the session into contiguous active bouts and relief periods.
+`v_threshold` tells the algorithm what counts as movement.
+
+```{r designate-corbett}
+corbett_trace <- designate(exemplar_trace,
+                           method = "corbett",
+                           v_threshold = 2)
 ```
 
-## 7. Designate — segment activity vs rest
-
-`designate()` allows us to split an activity into drills, quarters etc.
-In *motiongrammar*, I have included a native PELT changepoint detection
-on the velocity signal to identify contiguous activity bouts and relief
-periods.
-
-```{r designate}
-trace <- trace |>
-  designate(v_threshold = 0.3,
-    method = "corbett")
-```
-
-Visualise the segmentation.
-
-```{r designate-plot}
-trace |> 
-ggplot(aes(x = unix_time, 
-           y = velocity, 
-           colour = designation)) +
+```{r plot-designate}
+corbett_trace |>
+  filter(velocity < 10) |>
+  ggplot(aes(x = unix_time, y = velocity, colour = designation)) +
   geom_line(linewidth = 0.4) +
-  labs(title = "Velocity coloured by designation",
-       x = "Time (s)", 
-       y = "Velocity (m/s)", 
-       colour = "Segment") +
+  labs(title = "Velocity coloured by automated segment",
+       x = "Time (s)", y = "Velocity (m/s)", colour = NULL) +
   theme_minimal() +
-  theme(panel.grid = element_blank(),
-        legend.position = "bottom")
+  theme(panel.grid = element_blank(), legend.position = "bottom")
 ```
 
-In this example, we only end up with one segment. This is due to the
-synthetic data used – there literally is only one period here. Future
-versions of *motiongrammar* will incorporate spatial data to be
-automatically identify drills in addition to velocity.
+The automated labels (`active_1`, `relief_1` etc.) are generic. For
+structured sessions you will want named drill periods. Use
+`export_designations()` to write the detected ranges to a CSV — this is
+your skeleton to edit:
+
+```{r export-designations}
+skeleton_path <- tempfile(fileext = ".csv")
+export_designations(corbett_trace, path = skeleton_path)
+read.csv(skeleton_path)
+```
+
+Two edits you will typically make before saving this as your session
+label file:
+
+-   **Rename** `active_1`, `relief_1` etc. to meaningful drill labels
+    (`warmup_mobility`, `tempo_run`, `change_of_direction`, etc.)
+-   **Shift timestamps by a few seconds** where needed — common when
+    your stopwatch or video system is slightly offset from GPS time, or
+    where you want to trim the edges of a period
+
+You will notice the algorithm did a *reasonable job*. But in the real
+world, we would use 8b since the efforts being clipped is not ideal.
+
+### 8b. Importing manual designations (preferred!)
+
+In practice the label file usually comes from a coaching system, a video
+coder, or an edited version of the skeleton above. The expected format
+is three columns: `designation`, `unix_start`, `unix_end`.
+
+```{r read-desig-csv}
+desig_csv <- system.file("data", "motiongrammar_quickstart_designations.csv", package = "motiongrammar")
+```
+
+```{r designate-manual}
+exemplar_trace <- designate(
+  exemplar_trace,
+  method = "manual",
+  file = desig_csv
+)
+quality_report(exemplar_trace, step = 'designate')
+
+```
+
+The quality log records the source file path and every row assigned,
+making the designation fully auditable. If your column names differ,
+`cols = 'guess'` handles fuzzy matching, or supply an explicit mapping:
+
+```{r designate-cols-options, eval=FALSE}
+# Fuzzy detection — tolerates "label", "start_time", "stop" etc.
+designate(exemplar_trace, 
+          method = "manual",
+          file = desig_csv, 
+          cols = "guess")
+
+# Explicit mapping — most robust for automated pipelines
+designate(exemplar_trace, method = "manual",
+          file = desig_csv,
+          cols = c(designation = "designation",
+                   unix_start = "unix_start",
+                   unix_end = "unix_end"))
+```
 
 ------------------------------------------------------------------------
 
-## 8. Elaborate — derive custom metrics
+## 9. Elaborate (optional) - add custom time-series
 
-`elaborate()` is a `dplyr::mutate()` wrapper that is safe to use on
-`motion_trace` objects — it preserves the `metadata` and `quality`
-attributes that a bare `mutate()` would silently drop.
+`elaborate()` is a `motion_trace`-safe `dplyr::mutate()` wrapper. It
+preserves the `metadata` and `quality` attributes that a bare `mutate()`
+would silently drop. In our example below, we are going to manually
+remove the pesky velocity spike. Whilst not scientifically ideal, it is
+common for practitioners to have a threshold for inhuman velocity (I
+know some AFL teams use 32 km/hr for instance)
 
-Use it any time you want to add a computed column before allocating or
-quantitating. Here we create **curved load** - a metric I ... Just made
-up for the sake of demonstrating this feature.
+### Removing the off-field artefact
+
+The position jump from the player leaving the field produced:
+
+-   a velocity spike well above any realistic sprinting speed (\>8.5 m/s
+    ≈ 31 km/h here.)
+-   an angular velocity spike of hundreds or thousands of deg/s —
+    impossible biomechanically, caused by the GPS unit snapping back to
+    a new position in a single frame
+
+Here, we apply a simple clamp.
+
+Setting `log_expr = TRUE` tells motiongrammar to record the exact
+expression used for each column — critical when you are overwriting a
+reserved pipeline column like `velocity`, because downstream steps
+(allocate, quantitate) will silently use the new values. Without an
+audit trail you lose traceability of what your reported numbers actually
+represent.
 
 ```{r elaborate}
-trace <- trace |>
-  elaborate(curved_load = velocity * abs(angular_velocity))
+exemplar_trace <- elaborate(
+  exemplar_trace,
+  velocity = pmin(velocity, 8.5),                # hard ceiling: ~28.8 km/h
+  angular_velocity = pmin(abs(angular_velocity), 360), # pivot ≈ 360 deg/s max
+  curved_load = velocity * angular_velocity,      # direction-weighted load (clean values)
+  log_expr = TRUE
+)
 ```
+
+```{r elaborate-quality}
+quality_report(exemplar_trace, step = 'elaborate')
+```
+
+In the report above, the `⚠ Overwrote` line flags that `velocity` and
+`angular_velocity` are reserved columns — values computed by
+`derivate()` that the rest of the pipeline depends on. The `Expressions`
+block records *exactly what you replaced them with*, so any colleague
+(or future you) can reconstruct what the output numbers mean without
+digging through script history.
+
+Elaborate allows you to calculate anything you might want on a
+time-series level. That might be *moving averages* (initially proposed
+by Varley et al., coined and popularised as *peak demands* by Delaney et
+al.)
 
 ------------------------------------------------------------------------
 
-## 9. Allocate — assign intensity bands
+## 10. Allocate — assign intensity bands
 
-`allocate()` cuts each derivative into labelled bands using
-user-supplied thresholds. You can call it multiple times with different
-`allocation_name` values to layer multiple profiling schemes. Here, we
-specify the bands in the script itself. But you can also call them
-through an external file (outlined outside of quickstart)
+`allocate_csv()` reads a band definition file and applies every profile
+it contains in a single call. This is the most common workflow in
+practice — your team or lab maintains one canonical thresholds file that
+everyone imports, keeping analyses comparable across sessions and
+analysts.
+
+```{r read-alloc-csv}
+alloc_csv <- system.file("data", "motiongrammar_quickstart_allocations.csv", package = "motiongrammar")
+```
 
 ```{r allocate}
-trace <- trace |>
-  allocate(allocation = list(
-      velocity = c(0, 2, 4, 6, 8),
-      acceleration = c(0, 1, 2, 3, 4),
-      angular_velocity = c(0,90,180)),
-    allocation_name = "gps_standard"
-  )
+exemplar_trace <- allocate_csv(exemplar_trace, 
+                               file = alloc_csv)
+```
 
+The CSV defines two profiles (`gps_standard` and `quickstart_simple`),
+each applied in one call. Reference them by name in `quantitate()`.
+
+If you need a quick one-off scheme without a file, `allocate()` accepts
+a named list directly. This is useful for exploratory work or computed
+thresholds from a model (e.g. Sweeting's clustering approach):
+
+```{r allocate-manual-example, eval=FALSE}
+exemplar_trace <- allocate(
+  exemplar_trace,
+  allocation = list(
+    velocity = c(0, 1.5, 3.5, 5.0, Inf),
+    acceleration = c(0, 1.0, 2.0, Inf)
+  ),
+  allocation_name = "custom_session"
+)
 ```
 
 ------------------------------------------------------------------------
 
-## 10. Quantitate — summarise by segment and intensity band
+## 11. Quantitate — summarise
 
-`quantitate()` aggregates the motion trace by designation segment and
-intensity band, returning a tidy summary tibble. The full quality log is
-preserved as an attribute on the result. You can calculate any basic
-aggregate parameter here. You'd usually want to do this by
-designation....
+`quantitate()` aggregates by designation segment and intensity band. The
+full quality log is preserved as an attribute on the result. Call it
+once per derivative you want to profile — the results are separate
+tibbles that can be joined on `designation` downstream.
 
-```{r quantitate}
-summary_tbl <- trace |>
-  quantitate(
-    allocation = "gps_standard",
-    derivative = "velocity",
-    scope = "designation",
-    active_only = FALSE,
-    n_frames = dplyr::n(),
-    time_s = dplyr::n() / 10,
-    dist_m = sum(distance, na.rm = TRUE),
-    mean_vel = mean(velocity, na.rm = TRUE)
-  )
+### Velocity profile by segment
 
-summary_tbl
+```{r quantitate-velocity}
+by_vel <- quantitate(
+  exemplar_trace,
+  allocation = "gps_standard",
+  derivative = "velocity",
+  scope = "designation",
+  active_only = TRUE,
+  time_s = n() / 10,
+  peak_vel = max(velocity, na.rm = TRUE),
+  mean_hr = mean(HeartRate, na.rm = TRUE)
+)
+
+by_vel
 ```
 
-But you can also get session totals. Here you'd probably want to keep
-active only, however.
+### Acceleration profile by segment
+
+```{r quantitate-acceleration}
+by_accel <- quantitate(
+  exemplar_trace,
+  allocation = "gps_standard",
+  derivative = "acceleration",
+  scope = "designation",
+  active_only = TRUE,
+  time_s = n() / 10,
+  peak_accel = max(acceleration, na.rm = TRUE),
+  mean_accel = mean(acceleration, na.rm = TRUE),
+  n_efforts = sum(acceleration >= 2, na.rm = TRUE)  # frames at high+ accel
+)
+
+by_accel
+```
+
+### Angular velocity (turning) profile by segment
+
+```{r quantitate-angular}
+by_ang <- quantitate(
+  exemplar_trace,
+  allocation = "gps_standard",
+  derivative = "angular_velocity",
+  scope = "designation",
+  active_only = TRUE,
+  time_s = n() / 10,
+  peak_ang_vel = max(angular_velocity, na.rm = TRUE),
+  mean_ang_vel = mean(angular_velocity, na.rm = TRUE),
+  n_cod = sum(angular_velocity >= 90, na.rm = TRUE)  # frames in turn+
+)
+
+by_ang
+```
+
+### Session totals — all three derivatives
 
 ```{r quantitate-session}
-session_totals <- trace |>
-  quantitate(allocation = "gps_standard",
-    derivative = "velocity",
-    scope = "session",
-    active_only = TRUE,
-    time_s = dplyr::n() / 10,
-    dist_m = sum(distance, na.rm = TRUE),
-    peak_vel = max(velocity, na.rm = TRUE))
+session_totals <- quantitate(
+  exemplar_trace,
+  allocation = "gps_standard",
+  derivative = "velocity",
+  scope = "session",
+  active_only = TRUE,
+  time_s = n() / 10,
+  peak_vel = max(velocity, na.rm = TRUE),
+  mean_hr = mean(HeartRate, na.rm = TRUE),
+  peak_accel = max(acceleration, na.rm = TRUE),
+  mean_ang_vel = mean(angular_velocity, na.rm = TRUE),
+  peak_ang_vel = max(angular_velocity, na.rm = TRUE),
+  curved_load = sum(curved_load, na.rm = TRUE)
+)
 
 session_totals
 ```
 
 ------------------------------------------------------------------------
 
-## Appendix - Inspect the quality log
+## Appendix: quality log
 
-Let's take a look at the quality log I outlined earlier now that we are
-at the end. Notice how it preserved everything we did to the trace?
+Every step appends to the quality log. Inspect it at any point — here at
+the end you can see the full provenance of everything done to the trace:
 
-```{r quality-report}
-quality_report(trace)
+```{r quality-final}
+quality_report(exemplar_trace)
 ```
 
 ------------------------------------------------------------------------
 
-## Saving Results
+## Saving results
 
-R attributes (including the quality log) are not preserved by write_csv.
-Use `saveRDS()` to keep the full object, or extract the quality log
-before writing to CSV:
+`write_csv` drops R attributes. Use `saveRDS` to keep the full object:
 
 ```{r save, eval=FALSE}
-# Preserve the full motion_trace with quality log
-saveRDS(trace, "session_processed.rds")
+saveRDS(exemplar_trace, "session_processed.rds")
 
-# Export summary to CSV (attributes are dropped — this is expected)
-readr::write_csv(summary_tbl, "session_summary.csv")
+## Save our summary files
+readr::write_csv(by_vel,"by_velocity.csv")
+readr::write_csv(by_accel,"by_acceleration.csv")
+readr::write_csv(by_ang,"by_angular_velocity.csv")
 
-# Save quality log separately if you need it alongside the CSV
-qual_log <- attr(trace, "quality")
-saveRDS(qual_log, "session_quality_log.rds")
-```
-
-------------------------------------------------------------------------
-
-## Pipeline at a glance
-
-The real value in *motiongrammar* is building pipes. We took it step by
-step above, but below is a very real pipeline of how this package can be
-utilised.
-
-```{r}
-trace <- initiate(session = '~/motiongrammar/data/example_gps_file_short.csv',
-                  method = 'guess') |>
-  coordinate(from = "latlong", 
-             to = "xyz", 
-             norm = TRUE) |>
-  interpolate(hz = 10) |>
-  filtrate(method = "butterworth", 
-           target = "coordinates", 
-           cutoff = 1.5) |>
-  derivate() |>
-  designate() |>
-  allocate(allocation_name = "gps_standard") |>
-  quantitate(allocation = "gps_standard",
-    derivative = "velocity",
-    scope = "session",
-    time_s = dplyr::n() / 10,
-    dist_m = sum(distance, na.rm = TRUE))
+## Save quality log as it's own file.
+saveRDS(attr(exemplar_trace, "quality"), "quality_log.rds")
 ```

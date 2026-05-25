@@ -85,9 +85,10 @@ quantitate <- function(
 
   existing_groups <- dplyr::group_vars(.data)
 
-  # Row filtering
+  # Row filtering — use isTRUE(grepl()) pattern via %in% NA-safe comparison so
+  # rows with NA designation are explicitly excluded rather than silently dropped.
   if (scope == 'active' || (scope == 'designation' && active_only)) {
-    .data <- dplyr::filter(.data, grepl('^active_', designation))
+    .data <- dplyr::filter(.data, !is.na(designation) & grepl('^active_', designation))
   }
 
   # Grouping: designation scope always includes designation column;

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<csv_template>
+  <coord_system>gps</coord_system>
+  <skip>6</skip>
+  <max_empty_lines>3</max_empty_lines>
+  <comment>#</comment>
+  <duplicate_method>return_error</duplicate_method>
+  <delimiter>,</delimiter>
+  <decimal>.</decimal>
+  <columns>
+    <col_unix>UnixTimestamp</col_unix>
+    <col_coord1>Latitude</col_coord1>
+    <col_coord2>Longitude</col_coord2>
+    <col_coord3>Elevation</col_coord3>
+  </columns>
+  <extra_columns>
+    <col ref="HeartRate"/>
+    <col ref="PlayerLoad"/>
+    <col ref="MetabolicPower"/>
+    <col ref="Cadence"/>
+  </extra_columns>
+</csv_template>

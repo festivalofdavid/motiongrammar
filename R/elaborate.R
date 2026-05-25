@@ -95,23 +95,24 @@ elaborate <- function(.data, ..., by = NULL, log_expr = FALSE) {
   )
 
   entry <- list(
-    step            = 'elaborate',
-    step_id         = .mg_step_id(),
-    package_version = .mg_pkg_version(),
-    timestamp       = .mg_timestamp(),
-    by              = effective_by,
-    added           = added,
-    modified        = modified,
-    rows_before     = rows_before,
-    rows_after      = nrow(out),
-    cols_before     = cols_before,
-    cols_after      = names(out),
-    expressions     = if (log_expr) {
+    step                 = 'elaborate',
+    step_id              = .mg_step_id(),
+    package_version      = .mg_pkg_version(),
+    timestamp            = .mg_timestamp(),
+    by                   = effective_by,
+    added                = added,
+    modified             = modified,
+    overwritten_reserved = overwritten,
+    rows_before          = rows_before,
+    rows_after           = nrow(out),
+    cols_before          = cols_before,
+    cols_after           = names(out),
+    expressions          = if (log_expr) {
       vapply(quos, rlang::quo_text, character(1))
     } else {
       NULL
     },
-    dependencies    = list(dplyr = dplyr_version)
+    dependencies         = list(dplyr = dplyr_version)
   )
 
   qual$elaborate <- append(qual$elaborate, list(entry))

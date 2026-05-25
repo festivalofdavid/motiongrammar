@@ -29,7 +29,8 @@ Imports:
     stringdist,
     tidyr,
     uuid,
-    rlang
+    rlang,
+    vctrs
 Suggests:
     ggplot2,
     patchwork,

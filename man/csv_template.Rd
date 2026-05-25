@@ -19,7 +19,9 @@ csv_template(
   skip = 0L,
   max_empty_lines = 3L,
   comment = "#",
-  duplicate_method = c("return_error", "use_first", "use_second")
+  duplicate_method = c("return_error", "use_first", "use_second"),
+  delimiter = ",",
+  decimal = "."
 )
 }
 \arguments{
