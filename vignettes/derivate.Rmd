@@ -22,15 +22,15 @@ knitr::opts_chunk$set(
 ```
 
 ```{r pipeline-setup, include=FALSE}
-devtools::load_all()
+library(motiongrammar)
 library(ggplot2)
 library(dplyr)
 library(tidyr)
 
 # Build through filtrate — we demonstrate derivate() here
 trace_pre <- initiate(
-  session = '~/motiongrammar/data/example_gps_file_short.csv',
-  source  = 'catapult_replay'
+  session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
+  source  = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -54,8 +54,8 @@ library(dplyr)
 library(tidyr)
 
 trace_pre <- initiate(
-  session = '~/motiongrammar/data/example_gps_file_short.csv',
-  source  = 'catapult_replay'
+  session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
+  source  = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>

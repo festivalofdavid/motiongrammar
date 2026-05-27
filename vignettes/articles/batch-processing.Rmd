@@ -1,0 +1,183 @@
+---
+title: "Batch processing"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Batch processing}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  eval     = FALSE,
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+## The pattern
+
+- Batch processing in motiongrammar means running the same pipeline over a folder of session files and stacking the results
+- The template system is what makes this safe: one `csv_template` or `api_stream_template` object is defined once and reused for every file — column mappings, coordinate system, and skip rows are identical across sessions
+- Each session returns its own `motion_trace`; summaries are extracted with `quantitate()` and bound together with `dplyr::bind_rows()`
+
+---
+
+## Minimal example — GPS CSV folder
+
+```r
+library(motiongrammar)
+library(dplyr)
+library(purrr)
+
+# 1. Load the template once — defined from a representative file
+template <- load_csv_template("catapult_template.xml")
+
+# 2. Find all session files
+session_files <- list.files("data/sessions/", pattern = "\\.csv$", full.names = TRUE)
+
+# 3. Define the pipeline as a function
+process_session <- function(path) {
+  player_id  <- tools::file_path_sans_ext(basename(path))
+  desig_file <- file.path("data/labels", paste0(player_id, "_labels.csv"))
+
+  initiate(session = path, template = template) |>
+    coordinate(norm = TRUE) |>
+    interpolate(hz = 10, max_gap_frames = 20) |>
+    filtrate(method = "butterworth", target = "coordinates", cutoff = 1.5) |>
+    derivate(derivatives = c("velocity", "acceleration", "angular_velocity")) |>
+    designate(method = "manual", file = desig_file) |>
+    elaborate(curved_load = velocity * angular_velocity) |>
+    allocate_csv(file = "data/bands/gps_standard.csv")
+}
+
+# 4. Run across all files — purrr::map returns a named list of motion_trace objects
+traces <- set_names(session_files, basename(session_files)) |>
+  map(safely(process_session))
+
+# 5. Separate successes from failures
+ok     <- keep(traces, ~ is.null(.$error))
+failed <- keep(traces, ~ !is.null(.$error))
+
+if (length(failed) > 0) {
+  message(length(failed), " session(s) failed:")
+  walk(failed, ~ message("  ", .$error$message))
+}
+
+processed <- map(ok, "result")
+```
+
+---
+
+## Extracting summaries
+
+```r
+# Run quantitate on each processed trace, tag with session name
+summaries <- imap(processed, function(trace, session_name) {
+  quantitate(
+    trace,
+    allocation  = "gps_standard",
+    derivative  = "velocity",
+    scope       = "designation",
+    active_only = TRUE,
+    time_s      = n() / 10,
+    peak_vel    = max(velocity, na.rm = TRUE),
+    mean_hr     = mean(HeartRate, na.rm = TRUE)
+  ) |>
+    mutate(session = session_name, .before = 1)
+})
+
+# Stack into one table
+all_sessions <- bind_rows(summaries)
+```
+
+---
+
+## Adding player metadata
+
+```r
+# If player metadata lives in the file path or a lookup table
+player_meta <- readr::read_csv("data/player_roster.csv")
+# columns: session_file, player_id, position, age
+
+all_sessions <- all_sessions |>
+  left_join(player_meta, by = c("session" = "session_file"))
+```
+
+---
+
+## Collecting quality logs
+
+```r
+# Pull quality logs from every trace into one list — keyed by session name
+quality_logs <- map(processed, ~ attr(.x, 'quality'))
+
+# Check for issues across all sessions
+issues_by_session <- imap(quality_logs, function(qual, session) {
+  interp_issues <- qual$interpolate[[length(qual$interpolate)]]$issues
+  if (!is.null(interp_issues)) {
+    tibble(session = session, step = "interpolate", issue = interp_issues)
+  }
+}) |>
+  bind_rows()
+
+issues_by_session
+```
+
+---
+
+## Parallelisation
+
+- The pipeline is stateless per session — there are no shared objects
+- Use `furrr::future_map()` as a drop-in replacement for `purrr::map()` to parallelise across CPU cores
+
+```r
+library(furrr)
+plan(multisession, workers = 4)
+
+processed <- set_names(session_files, basename(session_files)) |>
+  future_map(safely(process_session), .progress = TRUE)
+
+plan(sequential)  # reset
+```
+
+---
+
+## Saving batch output
+
+```r
+# Save each processed trace as RDS — preserves full quality log
+walk2(processed, names(processed), function(trace, name) {
+  saveRDS(trace, file.path("output/traces", paste0(name, ".rds")))
+})
+
+# Save the stacked summary table
+readr::write_csv(all_sessions, "output/session_summaries.csv")
+
+# Save all quality logs as a single RDS
+saveRDS(quality_logs, "output/quality_logs_batch.rds")
+```
+
+---
+
+## Common failure modes in batch runs
+
+- **Missing label file** — `designate(method = 'manual')` will error if the designation CSV doesn't exist; wrap in `safely()` and log failures
+- **Different device firmware across sessions** — column names may drift between firmware versions; use `guess_csv_template()` on a suspicious file to check, then update the template
+- **Variable Hz across sessions** — if `hz` varies by device or firmware, read `meta$native_hz` from metadata after `initiate()` and pass it explicitly to `interpolate()`
+- **Timezone issues** — `initiate()` normalises all timestamps to Unix time (UTC); verify `native_hz` and `start_time` in `metadata_report()` for each session if results look temporally misaligned
+
+```r
+# Defensive hz resolution
+process_session_safe <- function(path) {
+  trace <- initiate(session = path, template = template)
+  hz    <- attr(trace, 'metadata')$native_hz %||% 10L
+
+  trace |>
+    coordinate(norm = TRUE) |>
+    interpolate(hz = hz, max_gap_frames = as.integer(hz * 2))
+    # ... rest of pipeline
+}
+```

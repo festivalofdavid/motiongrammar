@@ -2,10 +2,10 @@
 title: "Coordinate: Projecting GPS to Cartesian Space"
 output: rmarkdown::html_vignette
 vignette: >
-%\VignetteIndexEntry{Coordinate: Projecting GPS to Cartesian Space}
+  %\VignetteIndexEntry{Coordinate: Projecting GPS to Cartesian Space}
   %\VignetteEncoding{UTF-8}
   %\VignetteEngine{knitr::rmarkdown}
-  editor_options:
+editor_options:
   markdown:
     wrap: 72
 ---
@@ -22,14 +22,14 @@ knitr::opts_chunk$set(
 ```
 
 ```{r load-pkg, include=FALSE}
-devtools::load_all()
+library(motiongrammar)
 library(ggplot2)
 library(dplyr)
 
 # Load raw GPS trace — we demonstrate coordinate() in this vignette
 trace_raw <- initiate(
-  session = '~/motiongrammar/data/example_gps_file_short.csv',
-  source  = 'catapult_replay'
+  session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
+  source  = 'guess_csv'
 )
 ```
 
@@ -63,8 +63,8 @@ library(motiongrammar)
 library(ggplot2)
 library(dplyr)
 
-trace_raw <- initiate(session = '~/motiongrammar/data/example_gps_file_short.csv',
-                      source  = 'catapult_replay')
+trace_raw <- initiate(session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
+                      source  = 'guess_csv')
 
 trace <- trace_raw |>
   coordinate(from = "latlong", 

@@ -1,100 +1,194 @@
-# motiongrammar
+# motiongrammar <img src="man/figures/logo.png" align="right" height="139" alt="" />
 
-## Background
-motiongrammar is a Tidyverse-native R package designed to process raw GPS and Local Positioning System (LPS) data into a structured 'grammar' of movement.
+<!-- badges: start -->
+<!-- badges: end -->
 
-I built this package with the following in mind:
-1. Inspired by hassles in my PhD, I wanted to create a package that cleans files from different providers with ease.
-2. Leading on from this, I wanted to create a standardised structure for locational tracking data, to easily calculate analyse and visualise.
-3. Create a more intuitive interface for the tasks I struggled with as a student. Specifically, transforming latitude and longitude to (x,y) coordinates and applying biomechanical filters.
-4. Integrate academic work, such as _Alice Sweeting's angular velocity_ or my own _time series segmentation_ so that scientists can easily explore methods used in other sports and papers.
-5. Offer a tidyverse style pipeline for tracking data- having relied upon cumbersome loops left to run over night on my 2016 Macbook (only to have them crash), I wanted a coding philosophy that is clean and returns more intuitive errors if encountered.
-6. Offer a unified wrapper for commonly used packages in Academic tracking tasks (ie., signal, zoo). 
-7. Improve reproducibility - Academics often don't reference the exact packages they used for each step. creating a messy audit trail. I wanted a package to automatically record this.
-8. To educate - _motiongrammar_ is deliberately a dorky pun combining the idea of a "grammar of motion" (a la Hadley Wickham's ggplot2) with Motion Grammar (a school). My mentor Alice always said that the best way to learn is on your own data. My hope is that this package encourages students to do so, and makes some of the concepts I struggled with (for example low pass filters) much more accessible.
+## Overview
 
-## The motion_trace class
-_motiongrammar_ introduces a new class "motion_trace". It includes the following:
-1. .data - this works as a standard tidyverse style tibble. It is capable of storing coordinates, derivatives and custom user metrics as a time-series.
-2. quality - this attribute tracks everything the user does on _.data___ including package versions, filters, calculations etc. The aim here is to help with clearer and more reproducible methods sections.
-3. meta - this attribute tracks any information the Scientist may wish to store, including playerid, column mappings, session_start time etc.
+- **What it does** — loads raw human tracking data (GPS, RFID, optical), processes it through a structured nine-step pipeline, and returns tidy summary tables
+- **Why it exists** — existing tools treat each processing step as a separate script with no shared state; motiongrammar chains them into a single pipe-friendly workflow and keeps a full audit log throughout
+- **Core object** — every step passes a `motion_trace`: a tibble with two extra attributes, `metadata` (device/session info) and `quality` (provenance log), that survive every operation
+- **Philosophy** — tidyverse-first; every function accepts a `motion_trace` on the left and returns one on the right, so the entire pipeline chains with `|>`
 
-## The "Ate" Pipeline
-_motiongrammar_ verbs all end with "ate". They are designed to be performed in the following order (albeit -- filtrate() can also be performed on derivatives, since I know some scientists prefer it that way.)
+---
 
-**1. initiate():**
-- Ingest raw data from gpx, csv or strava files.
-- Ability to guess csv structure using fuzzy logic.
-- User can create csv templates that can be saved for easy import.
-- Designed to handle inconsonsistent file formats, headings not beginning in first row etc.
+## The pipeline
 
-**2. coordinate():**
-- Projects Lat/Lng to local (x,y) coordinates.
-- Handles conversion between metric and imperial measurement systems.
-- Allows field rotation (currently experimental -- I haven't really used this yet or tested it extensively)
+```
+initiate → coordinate → interpolate → filtrate → derivate →
+designate → elaborate → allocate → quantitate
+```
 
-**3. filtrate():**
-- Smooths noise. Currently supports simple moving averages, exponential moving averages, butterworth high and low pass filters and savgol filters.
-- Includes helper functions to identify filter cut off frequency
+```r
+library(motiongrammar)
 
-**4. interpolate():**
-- Fills gaps on a fixed Hz grid with an is_interpolated flag.
+exemplar_trace <- initiate(session = "gps_session.csv",
+                           template = load_csv_template("my_device.xml")) |>
+  coordinate(norm = TRUE) |>
+  interpolate(hz = 10, max_gap_frames = 20) |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 0.4) |>
+  derivate(derivatives = c("velocity", "acceleration", "angular_velocity")) |>
+  designate(method = "manual", file = "drill_labels.csv") |>
+  elaborate(velocity = pmin(velocity, 8.5),
+            curved_load = velocity * angular_velocity) |>
+  allocate_csv(file = "intensity_bands.csv") |>
+  quantitate(allocation = "gps_standard", derivative = "velocity",
+             scope = "designation", time_s = n() / 10)
+```
 
-**5. derivate():** 
-- Calculates distance, velocity, acceleration and anguler velocity (dot product method) as standard time-series within user specified windows.
-- Experimental time-series for jerk (further derivative of acceleration. I have this for future proofing but personally think there is no way scientists should be using this on lower fidelity data like GPS or even optical systems.)
-- Experimental time-series for lateral-g (combined acceleration and angular velocity. Again, pretty experimental and wouldn't recommend. But it's there for completion sake.)
-
-**6. designate():**
-- Segments the session (e.g., 'Drill 1', 'Match') via PELT change-point detection from my PhD.
-- Allows users to import their own designations (ie., drill start and end time, period 1 start and end time etc.)
-
-**7.allocate():** 
-- Maps data points to custom intensity bands.
-- Support for multiple bands at once (so you could have one band set thats absolute, one thats relative, one using Sweeting's clustering method etc.)
-
-**8. quantitate():**
-- A wrapper for summarise in dplyr, where user can calculate aggregate parameters.
-
-**9. elaborate:**
-- Scientists can create their own custom columns, or keep columns from their csv/provider. For example, PlayerLoad, MetabolicPower etc.
-
-## Key Academic Features
-
-### The Interpolation Flag
-Most GPS software fills gaps silently. motiongrammar adds a logical is_interpolated column. If a coordinate was generated by a spline or linear fit rather than a sensor, you'll know about it—allowing you to exclude 'synthetic' data from high-intensity analysis.
-
-### Metadata Persistence
-Using the elaborate() function (our wrapper for mutate), you can add custom columns to your trace without stripping the S3 class or the underlying quality logs.
+---
 
 ## Installation
-R
-### Note: This is currently in dev!
 
-```
-remotes::install_github('yourusername/motiongrammar')
-Quick Start
-R
-require('motiongrammar')
+```r
+# Development version
+devtools::install_github("davidcorbett/motiongrammar")
 ```
 
-## A standard processing flow
-```
-trace <- initiate('session_01.csv', source = 'manual_csv') |>
-  coordinate(to = 'xyz', norm = TRUE) |>
-  filtrate(method = 'savgol', window = 7) |>
-  interpolate(method = 'spline', hz = 10) |>
-  derivate(derivatives = 'all') |>
-  designate(method = 'corbett') |>
-  allocate(allocation_name = 'squad_standards') |>
-  quantitate(scope = 'designation')
-```
-## Current Status & Known Issues
-What's not in v1.0
-- Visualisation Layer: I have intentionally left out plot_trace() or plot_bands(). The data is returned as a tidy tibble; use ggplot2 directly so you aren't restricted by my aesthetic choices.
-- Z-Axis Support: While the infrastructure for 3D coordinates exists in the code, the derivate functions currently focus on 2D planar motion.
+**Hard dependencies (installed automatically):** dplyr, tibble, readr, stringr, lubridate, sf, zoo, changepoint, httr2, jsonlite, purrr, stringdist, tidyr, uuid, rlang, vctrs
 
-## Known Quirks
-- The 'Leaky' Attribute: dplyr joins (like left_join) will still strip the motion_trace attributes. Use elaborate() for mutations and handle joins with care, re-assigning the class if necessary.
-- Interpolation Row-Drop: If your max_gap_frames is too tight, you will see NA values in coordinates. This isn't a bug—it's the package refusing to guess where an athlete was during a 30-second signal loss.
-- Savitzky-Golay Windowing: The filtrate function requires an odd window length. Passing an even number will currently cause an error from the underlying signal package.
+**Optional:** signal (Butterworth filtering via `filtrate(method = "butterworth")`), ggplot2, patchwork
+
+---
+
+## Step-by-step
+
+### 1. `initiate()` — load data
+
+- Reads GPS (CSV, GPX), RFID, optical, Strava, or any generic HTTP API stream
+- Returns a `motion_trace` with `unix_time`, coordinate columns, and any extra sensor columns (heart rate, player load, cadence, etc.)
+- `source = 'auto'` detects file type; `source = 'guess_csv'` fuzzy-detects column names for a quick look at an unfamiliar file
+- **Templates** lock in a device's column mapping so ingestion is identical across sessions:
+  - `csv_template()` — define column mapping, skip rows, coord system
+  - `guess_csv_template()` — auto-detect from a file, then refine
+  - `save_csv_template()` / `load_csv_template()` — persist as XML
+  - `api_stream_template()` — same pattern for HTTP APIs
+- `set_metadata()` — attach player name, session date, sport, or any custom field
+- Supported coordinate systems: GPS (`lat`/`lng`), local XY, local XYZ
+- Quality log records: row count, column completeness, temporal gap count, duplicate timestamps, detected Hz, device metadata
+
+### 2. `coordinate()` — project to metres
+
+- Converts spherical GPS degrees to a flat Cartesian plane (metres)
+- `norm = TRUE` — translates origin to the first valid position
+- Supports manual origin: supply a reference lat/lng to anchor all sessions to the same physical point
+- `drop_outliers = TRUE` — removes position jumps that exceed a speed threshold before projection
+- Adds `x`, `y`, and optionally `z` columns; preserves `lat`/`lng` originals
+- Quality log records: CRS used, origin coordinates, outlier rows removed, bounding box
+
+### 3. `interpolate()` — regularise frame rate
+
+- Builds a dense time grid at the target `hz` and joins the raw data onto it
+- Fills short gaps (`<= max_gap_frames`) with the chosen method; gaps beyond that threshold stay `NA`
+- Methods: `'linear'` (default, piecewise), `'spline'` (cubic — smoother but can overshoot), `'constant'` (LOCF)
+- **Numeric passthrough columns** (heart rate, cadence, etc.) are interpolated with the same method; character/factor columns are left as-is with `NA` for inserted rows
+- Adds `is_interpolated` (logical) column — marks every row that was filled rather than observed
+- Quality log records: gaps found, gap lengths, % rows interpolated, NAs filled per coordinate, passthrough columns interpolated vs skipped
+
+### 4. `filtrate()` — remove noise
+
+- Applies a digital filter to remove measurement noise from position or derivative signals
+- `target = 'coordinates'` filters `x`/`y`; `target = 'derivatives'` filters velocity, acceleration, angular_velocity
+- Methods: `'butterworth'` (requires signal package), `'moving_average'`, `'savitzky_golay'`
+- Filtered signal stored in `f_x`/`f_y` columns; originals untouched — downstream steps use filtered by default
+- `filtrate_cutoff()` — diagnostic: sweeps a cutoff range and plots residuals to find the elbow; returns suggested cutoff
+- Quality log records: method, cutoff used, pass number (multiple passes supported)
+- Note: many vendor files are pre-filtered; if the residual plot shows no elbow, skip this step
+
+### 5. `derivate()` — compute derivatives
+
+- Computes time-series derivatives using central differences
+- Available derivatives: `'velocity'` (m/s), `'acceleration'` (m/s²), `'angular_velocity'` (deg/s), `'jerk'` (m/s³), `'lateral_g'` (experimental centripetal proxy)
+- `use_filtered = TRUE` (default) — uses `f_x`/`f_y` when available; falls back to `x`/`y`
+- `speed_floor` — velocity below this threshold is treated as stationary; heading/omega are zeroed to suppress sensor jitter artefacts
+  - `lateral_g` is explicitly forced to 0 when velocity < speed_floor
+- `window` — rolling window size per derivative (e.g. `list(velocity = 5, acceleration = 10)`)
+- `signed_omega = TRUE` — angular velocity is signed (positive = left turn); default is unsigned magnitude
+- Quality log records: window sizes, speed_floor, which derivatives computed, column-level min/max/mean/NA counts
+
+### 6. `designate()` — segment the session
+
+- Labels every row with a segment name (`active_1`, `relief_1`, etc.)
+- **`method = 'corbett'`** (default) — PELT changepoint detection on the velocity signal; `v_threshold` splits active from relief
+  - `export_designations()` — writes detected segment ranges to CSV as a named skeleton for manual editing
+- **`method = 'manual'`** — reads a three-column CSV (`designation`, `unix_start`, `unix_end`); `cols = 'guess'` handles non-standard column names
+- NA velocity rows (interpolated gaps) are propagated forward/backward so no row is left undesignated
+- Quality log records: method, source file (manual), changepoint indices and segment lengths (corbett), % rows designated
+
+### 7. `elaborate()` — add custom time-series
+
+- `motion_trace`-safe `dplyr::mutate()` wrapper — preserves `metadata` and `quality` attributes that bare `mutate()` drops
+- Accepts any number of named expressions: `elaborate(curved_load = velocity * angular_velocity)`
+- `log_expr = TRUE` — stores the deparsed expression for every column in the quality log; critical when overwriting reserved pipeline columns (`velocity`, `acceleration`, etc.) since downstream functions use those columns silently
+- Quality log flags with `⚠ Overwrote` when a reserved pipeline column is replaced
+
+### 8. `allocate()` / `allocate_csv()` — assign intensity bands
+
+- Maps each row's derivative value to an intensity band based on user-defined thresholds
+- `allocate()` — programmatic: pass a named list of threshold vectors
+- `allocate_csv()` — reads a CSV of band definitions; supports multiple named profiles in one file
+- Multiple allocations can coexist on the same trace under different names (e.g. `'gps_standard'`, `'custom_session'`)
+- Adds `{allocation_name}_velocity_band`, `{allocation_name}_acceleration_band`, etc. columns
+- Reference allocations by name in `quantitate(allocation = 'gps_standard')`
+- Quality log records: threshold boundaries, band names, rows per band
+
+### 9. `quantitate()` — summarise
+
+- Aggregates a `motion_trace` by designation segment and intensity band; returns a plain tibble
+- `scope`:
+  - `'designation'` — one row per designation × band combination
+  - `'session'` — one row per band across the whole session
+  - `'active'` — session-level but restricting to `active_*` segments only
+- `active_only = TRUE` (with `scope = 'designation'`) — drops relief segments before aggregating
+- Accepts arbitrary `dplyr::summarise()` expressions: `time_s = n() / 10, peak_vel = max(velocity, na.rm = TRUE)`
+- `band_duration()` — convenience wrapper; computes `duration_sec` per band using `interpolation_hz` from metadata
+- Full quality log is attached to the result tibble as `attr(result, 'quality')` — the summary table is self-describing
+- **Note:** `write_csv` silently drops attributes; use `saveRDS` to preserve provenance
+
+---
+
+## The quality log
+
+- Every pipeline step appends an entry to `attr(trace, 'quality')`
+- `quality_report(trace)` — prints a summary of all steps applied so far
+- `quality_report(trace, step = 'interpolate')` — inspect a single step
+- `metadata_report(trace)` — prints device/session metadata
+- `full_report(trace)` — prints both together
+- Each entry records: step name, UUID, package version, UTC timestamp, rows/cols before and after, step-specific diagnostics, and any issues detected
+- The log survives every pipeline operation and is copied onto `quantitate()` output
+- Repeated calls to the same pipeline step append rather than overwrite — run count is shown in the report
+
+---
+
+## Data persistence
+
+```r
+# Keep full object with all attributes
+saveRDS(trace, "session_processed.rds")
+
+# Summary tables are safe as CSV
+readr::write_csv(by_vel, "by_velocity.csv")
+
+# Save quality log separately
+saveRDS(attr(trace, "quality"), "quality_log.rds")
+```
+
+---
+
+## Supported data sources
+
+| Source | `source =` argument | Notes |
+|---|---|---|
+| Generic CSV with template | `'csv'` or `'auto'` | Preferred production path |
+| Auto-detect CSV | `'guess_csv'` | For exploration only |
+| GPX file | `'gpx'` | Requires sf package |
+| Strava activity | `'strava'` | Requires OAuth tokens |
+| Generic HTTP API | `'generic'` | Requires `api_stream_template()` |
+
+---
+
+## Getting help
+
+- `?initiate`, `?quality_report`, etc. for function docs
+- `vignette("quickstart", package = "motiongrammar")` for end-to-end walkthrough
+- File issues at <https://github.com/davidcorbett/motiongrammar/issues>

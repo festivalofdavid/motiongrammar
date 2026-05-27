@@ -22,14 +22,14 @@ knitr::opts_chunk$set(
 ```
 
 ```{r pipeline-setup, include=FALSE}
-devtools::load_all()
-require(motiongrammar)
-require(tidyverse)
+library(motiongrammar)
+library(ggplot2)
+library(dplyr)
 
 # Build trace up to the point before interpolation
 trace_pre <- initiate(
-  session = '~/motiongrammar/data/example_gps_file_short.csv',
-  source  = 'catapult_replay'
+  session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
+  source  = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE)

@@ -1,0 +1,196 @@
+---
+title: "The quality log system"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{The quality log system}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  eval     = FALSE,
+  warning  = FALSE,
+  message  = FALSE
+)
+```
+
+## What the quality log is
+
+- A nested list attached to every `motion_trace` object as `attr(trace, 'quality')`
+- Every pipeline step appends one entry — it never overwrites
+- The log travels with the data through the entire chain and is copied onto `quantitate()` output
+- Purpose: reproducibility, debugging, academic auditability, and production monitoring
+
+---
+
+## What every entry records
+
+Every step writes these fields regardless of which function produced it:
+
+- `step` — function name (`'initiate'`, `'interpolate'`, etc.)
+- `step_id` — UUID (unique per call, not per session — reruns produce new IDs)
+- `package_version` — motiongrammar version at time of execution
+- `timestamp` — UTC ISO 8601
+- `rows_before` / `rows_after` — row count entering and leaving the function
+- `cols_before` / `cols_after` — column names entering and leaving
+- `issues` — character vector of warnings the function detected (NULL when clean)
+
+Steps that are called more than once append additional list entries — the report shows the run count.
+
+---
+
+## Step-specific fields
+
+### `initiate`
+- `source` — data source type used
+- `native_hz` — detected or inferred sample rate
+- `n_rows`, `n_coord_complete` — row count and rows with non-NA coordinates
+- `n_time_gaps`, `n_duplicates` — temporal anomalies detected at ingestion
+- `col_names` — all columns present in the raw file
+
+### `coordinate`
+- `crs` — coordinate reference system used for projection
+- `origin` — lat/lng anchor point
+- `norm` — whether the trace was translated to origin
+- `n_outliers_removed` — position jumps removed before projection
+
+### `interpolate`
+- `method` — algorithm name and zoo function used
+- `hz`, `max_gap_frames`, `interval_sec`
+- `gaps` — count, total missing, min/max/mean gap lengths, gaps exceeding max_gap_frames
+- `filled` — NAs filled per axis (x, y, z)
+- `remaining_na` — NAs still present per axis after filling
+- `n_interpolated`, `pct_interpolated`
+- `passthrough_columns` — which non-coordinate columns were interpolated (numeric) vs skipped (character/factor), NA counts introduced and remaining
+
+### `filtrate`
+- `method`, `cutoff`, `target`, `pass_number`
+- `input_column_used` — which column was actually filtered (e.g. `f_x` on a second pass)
+
+### `derivate`
+- `derivatives` — which were computed
+- `windows` — rolling window per derivative
+- `speed_floor`, `signed_omega`
+- Per-column stats: min, max, mean, NA count
+
+### `designate`
+- `method` — `'corbett'` or `'manual'`
+- For corbett: `n_changepoints`, `changepoint_indices`, `segment_lengths`
+- For manual: `source_file`, `cols_mapping`
+- `n_segments`, `segment_counts`, `pct_designated`
+
+### `elaborate`
+- `expressions` — deparsed R expressions per column (when `log_expr = TRUE`)
+- `overwrote` — reserved pipeline columns that were replaced
+
+### `allocate`
+- `allocation_name`, `thresholds`, `band_names`
+- Rows per band per derivative
+
+### `quantitate`
+- `allocation`, `derivative`, `scope`, `active_only`
+- `group_vars`, `band_cols`
+- `rows_before` / `rows_after`
+
+---
+
+## Reading the log
+
+```r
+# Full log — all steps
+quality_report(trace)
+
+# One step only
+quality_report(trace, step = 'interpolate')
+quality_report(trace, step = 'filtrate')
+
+# Raw list access — for programmatic use
+qual <- attr(trace, 'quality')
+
+# Latest interpolate entry
+qual$interpolate[[length(qual$interpolate)]]
+
+# First interpolate entry (if run multiple times)
+qual$interpolate[[1]]
+
+# Step UUID — use this as a foreign key when logging results to a database
+qual$interpolate[[1]]$step_id
+```
+
+---
+
+## Accessing the log on a quantitate result
+
+- `quantitate()` copies the full quality log onto its output tibble
+- The result is a plain tibble, not a `motion_trace`, but the log is still there
+
+```r
+summary_tbl <- quantitate(trace, allocation = 'gps_standard',
+                           derivative = 'velocity', scope = 'session',
+                           time_s = n() / 10)
+
+# Log survives on the summary table
+qual <- attr(summary_tbl, 'quality')
+qual$quantitate[[1]]$timestamp
+```
+
+---
+
+## Persisting the log
+
+```r
+# Best: save the whole trace — log is embedded
+saveRDS(trace, "session_processed.rds")
+
+# Separate log file for archiving or database ingestion
+saveRDS(attr(trace, 'quality'), "quality_log.rds")
+
+# Load separately
+qual <- readRDS("quality_log.rds")
+```
+
+- `write_csv` / `write.csv` silently drop all R attributes including the log
+- The log is not a column — it cannot be written to tabular formats without extraction
+- For database logging: extract `step_id`, `timestamp`, `package_version`, and issue flags per entry
+
+---
+
+## Issues list
+
+- Each step populates `entry$issues` with human-readable warning strings when something is worth flagging
+- `NULL` means the step ran clean
+- Examples from real sessions:
+  - `interpolate`: "High interpolation ratio: 62% of rows are interpolated"
+  - `interpolate`: "3 gap(s) exceeded max_gap_frames (20) and were left as NA"
+  - `interpolate`: "2 passthrough column(s) have NAs for 47 inserted time-gap row(s): HeartRate, Cadence"
+  - `designate`: automatically recorded when < 90% of rows receive a designation
+- Issues are advisory — they do not stop execution
+
+---
+
+## Using the log for reproducibility
+
+- The `step_id` UUID uniquely identifies every function call
+- `package_version` + `timestamp` pin the exact software state
+- For academic output: attach the full RDS file as a supplementary data file; a reader can reconstruct every decision made to the data
+- For team pipelines: compare `step_id` hashes across analysts to verify identical processing
+
+---
+
+## Repeated pipeline steps
+
+- Calling the same step twice appends a second entry under the same key
+- `quality_report()` shows the run count when > 1
+- Use this deliberately for multi-pass filtering:
+
+```r
+trace <- trace |>
+  filtrate(method = "butterworth", target = "coordinates", cutoff = 2.0) |>
+  filtrate(method = "butterworth", target = "derivatives",  cutoff = 1.0)
+
+# qual$filtrate has two entries, one per pass
+quality_report(trace, step = 'filtrate')
+```

@@ -8,6 +8,8 @@ Authors@R:
 Description: Motion Grammar is designed as a tidyverse-friendly package to load,
     process, analyse and summarise human tracking data from GPS, RFID and Optical
     Tracking Data Sources.
+URL: https://davidcorbett.github.io/motiongrammar, https://github.com/davidcorbett/motiongrammar
+BugReports: https://github.com/davidcorbett/motiongrammar/issues
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

@@ -1,0 +1,656 @@
+---
+title: "Initiating Motion Traces from APIs"
+subtitle: "Strava defaults, extended streams, and generic REST templates"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  eval = FALSE
+)
+```
+
+# Overview
+
+`initiate()` can read motion data from local files such as CSV or GPX, but it can also initiate a `motion_trace` from an API.
+
+There are two main API pathways:
+
+1. **Dedicated Strava pathway**: easiest for Strava activities. This uses `source = "strava"`, reads the Strava token JSON, refreshes the access token when needed, fetches the activity metadata, then fetches the stream data.
+2. **Generic REST pathway**: a flexible template-based pathway for JSON APIs. This is useful when an API returns time-series data in a predictable structure and you want to map fields into the standard `motion_trace` columns.
+
+The recommended learning sequence is:
+
+1. Start with Strava defaults.
+2. Add extra Strava streams such as heart rate, distance, cadence, or power.
+3. Use Strava as a test case for the generic REST machinery.
+4. Adapt the same template idea to other APIs or structured exports.
+
+# Prerequisites
+
+Load the package during development:
+
+```{r}
+devtools::load_all()
+```
+
+Or, once installed:
+
+```{r}
+library(motiongrammar)
+```
+
+You also need a Strava token file at:
+
+```{r}
+path.expand("~/strava_tokens.json")
+```
+
+The token file should contain:
+
+```json
+{
+  "client_id": "YOUR_CLIENT_ID",
+  "client_secret": "YOUR_CLIENT_SECRET",
+  "refresh_token": "YOUR_REFRESH_TOKEN",
+  "access_token": "YOUR_ACCESS_TOKEN",
+  "expires_at": 0
+}
+```
+
+The `access_token` can be expired. The Strava pathway refreshes it using `refresh_token` when needed.
+
+# 1. Strava: default API initiation
+
+This is the cleanest Strava usage. It uses the package's dedicated Strava branch and default stream mapping.
+
+```{r}
+run_default <- initiate(
+  source = "strava",
+  session = "18529469417"
+)
+
+run_default
+quality_report(run_default)
+metadata_report(run_default)
+```
+
+You can also pass a full Strava activity URL:
+
+```{r}
+run_default <- initiate(
+  source = "strava",
+  session = "https://www.strava.com/activities/18529469417"
+)
+```
+
+By default, the Strava pathway requests the core spatial streams:
+
+- `time`
+- `latlng`
+- `altitude`
+
+The output becomes a standard `motion_trace` with columns like:
+
+```text
+unix_time, lat, lng, altitude, is_interpolated
+```
+
+The dedicated Strava path is preferable for Strava because it also fetches the activity metadata first. That metadata includes the activity start time, allowing the package to convert Strava's relative stream time into real Unix time.
+
+# 2. Strava: adding extra streams
+
+Strava streams can include additional fields such as:
+
+- `heartrate`
+- `distance`
+- `velocity_smooth`
+- `cadence`
+- `watts`
+
+To request these, use an `api_stream_template()` with `api = "strava"`. This still uses the dedicated Strava pathway, but the template tells it which streams to request and how to name the extras.
+
+```{r}
+strava_template <- api_stream_template(
+  api = "strava",
+  coord_system = "gps",
+  token_path = "~/strava_tokens.json",
+  stream_extra = c(
+    velocity_smooth = "velocity_smooth",
+    heartrate = "heartrate",
+    distance = "distance"
+  )
+)
+
+run_extended <- initiate(
+  session = "18529469417",
+  template = strava_template
+)
+
+run_extended
+names(run_extended)
+quality_report(run_extended)
+```
+
+Expected columns:
+
+```text
+unix_time, lat, lng, altitude, velocity_smooth, heartrate, distance, is_interpolated
+```
+
+You can add other Strava streams in the same way:
+
+```{r}
+strava_template_more <- api_stream_template(
+  api = "strava",
+  coord_system = "gps",
+  token_path = "~/strava_tokens.json",
+  stream_extra = c(
+    velocity_smooth = "velocity_smooth",
+    heartrate = "heartrate",
+    distance = "distance",
+    cadence = "cadence",
+    watts = "watts"
+  )
+)
+
+run_more <- initiate(
+  session = "18529469417",
+  template = strava_template_more
+)
+```
+
+A small warning: not every activity has every stream. For example, `watts` may be missing if power was not recorded or estimated for that activity. Start with fields you know exist, then expand.
+
+# 3. Saving and reusing a Strava API template
+
+Once a template works, save it so the data contract is explicit and reusable.
+
+```{r}
+save_api_stream_template(
+  strava_template,
+  "inst/templates/strava_activity_streams.xml"
+)
+```
+
+Then load it later by passing the XML path directly into `initiate()`:
+
+```{r}
+run_from_template_file <- initiate(
+  session = "18529469417",
+  template = "inst/templates/strava_activity_streams.xml"
+)
+```
+
+This is useful when an analysis needs to be reproducible across machines, projects, or collaborators.
+
+# 4. Generic REST API setup
+
+The generic REST pathway is for APIs that return JSON and can be mapped into a `motion_trace`.
+
+Use it when you have:
+
+- a URL endpoint,
+- optional query parameters,
+- optional authentication,
+- a JSON response containing time-series data,
+- fields that can be mapped to `unix_time` plus GPS or local coordinates.
+
+The generic pathway requires an `api_stream_template()` where `api = "generic"`.
+
+At minimum, the template needs to answer these questions:
+
+| Concept | Template argument | Example |
+|---|---|---|
+| What API pathway should `initiate()` use? | `api` | `"generic"` |
+| Are coordinates GPS or local? | `coord_system` | `"gps"` |
+| What URL should be called? | `url` | `"https://.../{session}/streams"` |
+| How should auth be applied? | `auth_type`, `auth_value` | bearer token from env var |
+| Where is the data in the JSON? | `data_path` | `"data.samples"` |
+| What shape is the response? | `response_format` | `"records"`, `"columnar"`, or `"streams"` |
+| Which field is time? | `stream_time` | `"timestamp"` |
+| Which fields are coordinates? | `stream_latlng` or `stream_lat` / `stream_lng` | `"latlng"` |
+| Which extra fields should be kept? | `stream_extra` | `c(hr = "heart_rate")` |
+
+## Response formats
+
+The generic reader supports three common JSON shapes.
+
+## Records
+
+Use `response_format = "records"` when the API returns an array of objects:
+
+```json
+[
+  {"timestamp": "2026-05-26T12:00:00Z", "lat": 40.1, "lng": -73.9, "heart_rate": 150},
+  {"timestamp": "2026-05-26T12:00:01Z", "lat": 40.1, "lng": -73.9, "heart_rate": 151}
+]
+```
+
+Template pattern:
+
+```{r}
+records_template <- api_stream_template(
+  api = "generic",
+  coord_system = "gps",
+  url = "https://example.com/api/sessions/{session}/samples",
+  request_method = "GET",
+  auth_type = "bearer",
+  auth_value = "$EXAMPLE_ACCESS_TOKEN",
+  response_format = "records",
+  time_type = "iso8601",
+  stream_time = "timestamp",
+  stream_lat = "lat",
+  stream_lng = "lng",
+  stream_extra = c(
+    heartrate = "heart_rate"
+  )
+)
+```
+
+## Columnar
+
+Use `response_format = "columnar"` when the API returns named arrays:
+
+```json
+{
+  "timestamp": [1770000000, 1770000001],
+  "lat": [40.1, 40.1],
+  "lng": [-73.9, -73.9],
+  "heart_rate": [150, 151]
+}
+```
+
+Template pattern:
+
+```{r}
+columnar_template <- api_stream_template(
+  api = "generic",
+  coord_system = "gps",
+  url = "https://example.com/api/sessions/{session}/samples",
+  request_method = "GET",
+  auth_type = "bearer",
+  auth_value = "$EXAMPLE_ACCESS_TOKEN",
+  response_format = "columnar",
+  time_type = "unix",
+  stream_time = "timestamp",
+  stream_lat = "lat",
+  stream_lng = "lng",
+  stream_extra = c(
+    heartrate = "heart_rate"
+  )
+)
+```
+
+## Streams
+
+Use `response_format = "streams"` when the API returns one object per stream, and each stream has a data vector. This is the Strava-like shape.
+
+```json
+{
+  "time": {"data": [0, 1, 2]},
+  "latlng": {"data": [[40.1, -73.9], [40.1, -73.9], [40.1, -73.9]]},
+  "heartrate": {"data": [150, 151, 152]}
+}
+```
+
+Template pattern:
+
+```{r}
+streams_template <- api_stream_template(
+  api = "generic",
+  coord_system = "gps",
+  url = "https://example.com/api/activities/{session}/streams",
+  request_method = "GET",
+  auth_type = "bearer",
+  auth_value = "$EXAMPLE_ACCESS_TOKEN",
+  response_format = "streams",
+  stream_data_key = "data",
+  time_type = "unix",
+  stream_time = "time",
+  stream_latlng = "latlng",
+  stream_extra = c(
+    heartrate = "heartrate"
+  )
+)
+```
+
+# 5. Generic REST using Strava as a case study
+
+This is not the recommended production path for Strava, but it is a good way to test whether the generic REST parser is working.
+
+First, refresh your Strava token using the package internals or by running a normal Strava initiation first. During package development, if `get_valid_tokens()` is not exported, use `motiongrammar:::get_valid_tokens()`.
+
+```{r}
+tokens <- jsonlite::fromJSON(path.expand("~/strava_tokens.json"))
+tokens <- motiongrammar:::get_valid_tokens(tokens)
+
+Sys.setenv(STRAVA_ACCESS_TOKEN = tokens$access_token)
+```
+
+Then create a generic template that points to Strava's streams endpoint:
+
+```{r}
+strava_generic_template <- api_stream_template(
+  api = "generic",
+  coord_system = "gps",
+  url = "https://www.strava.com/api/v3/activities/{session}/streams",
+  request_method = "GET",
+  request_params = list(
+    keys = "time,latlng,altitude,velocity_smooth,heartrate,distance",
+    key_by_type = "true"
+  ),
+  auth_type = "bearer",
+  auth_value = "$STRAVA_ACCESS_TOKEN",
+  response_format = "streams",
+  stream_data_key = "data",
+  time_type = "unix",
+  stream_time = "time",
+  stream_latlng = "latlng",
+  stream_altitude = "altitude",
+  stream_extra = c(
+    velocity_smooth = "velocity_smooth",
+    heartrate = "heartrate",
+    distance = "distance"
+  )
+)
+```
+
+Now initiate using the generic pathway:
+
+```{r}
+run_generic_strava <- initiate(
+  session = "18529469417",
+  template = strava_generic_template
+)
+
+run_generic_strava
+names(run_generic_strava)
+quality_report(run_generic_strava)
+```
+
+Important limitation: Strava's stream `time` is relative seconds from the start of the activity. The dedicated `source = "strava"` path converts this into real Unix time by first fetching the activity metadata. The generic REST test above is mainly a parser test, not the preferred production Strava ingestion path.
+
+# 6. Adapting the generic REST setup to another API
+
+For another API, inspect the JSON response and identify:
+
+1. The endpoint URL.
+2. The authentication style.
+3. Whether the response is `records`, `columnar`, or `streams`.
+4. Where the actual samples live inside the JSON.
+5. Which fields correspond to time, position, and optional extra signals.
+
+## Authentication options
+
+The generic pathway supports common auth patterns:
+
+```{r}
+# Bearer token in Authorization header
+api_stream_template(
+  api = "generic",
+  auth_type = "bearer",
+  auth_value = "$ACCESS_TOKEN",
+  # ... other fields
+)
+
+# API key in request header
+api_stream_template(
+  api = "generic",
+  auth_type = "api_key_header",
+  auth_header = "x-api-key",
+  auth_value = "$API_KEY",
+  # ... other fields
+)
+
+# API key as query parameter
+api_stream_template(
+  api = "generic",
+  auth_type = "api_key_query",
+  auth_param = "api_key",
+  auth_value = "$API_KEY",
+  # ... other fields
+)
+```
+
+Using environment variables is preferable to hardcoding secrets. In the template, write `auth_value = "$MY_TOKEN"`; at runtime, the package resolves that from `Sys.getenv("MY_TOKEN")`.
+
+# 7. What about Google Takeout?
+
+Google Takeout is slightly different: it is usually an exported archive, not a live REST API.
+
+That means it may be better treated as a file-import problem rather than an API problem:
+
+- If the export contains `.gpx` files, use the existing GPX path:
+
+```{r}
+takeout_gpx <- initiate(
+  source = "gpx",
+  session = "path/to/takeout/activity.gpx"
+)
+```
+
+- If the export contains CSV files, use `guess_csv`, `manual_csv`, or preferably a saved CSV template:
+
+```{r}
+takeout_csv <- initiate(
+  source = "guess_csv",
+  session = "path/to/takeout/location_history.csv"
+)
+```
+
+- If the export contains JSON files, that is not quite the same as the current generic REST pathway, because `fetch_generic_streams()` expects to call a URL. Conceptually, though, the mapping is the same: find the time field, coordinates, and any extra streams, then map them to the `motion_trace` schema.
+
+A future extension could add something like:
+
+```r
+source = "json_template"
+```
+
+or allow the generic API template to read from a local JSON file. That would make Google Takeout, Apple Health exports, or other archived data sources fit into the same template philosophy without pretending they are live APIs.
+
+# 8. Recommended production pattern
+
+For production work:
+
+1. Use `source = "strava"` for Strava unless deliberately testing generic REST.
+2. Use `api_stream_template(api = "strava", ...)` when you want Strava plus extra streams.
+3. Save stable templates with `save_api_stream_template()`.
+4. Use `api = "generic"` only when the source is truly a JSON REST API.
+5. Avoid storing tokens directly in scripts or templates. Prefer environment variables or token JSON files that are excluded from Git.
+
+# 9. Minimal examples
+
+## Strava default
+
+```{r}
+run <- initiate(
+  source = "strava",
+  session = "18529469417"
+)
+```
+
+## Strava with heart rate and distance
+
+```{r}
+template <- api_stream_template(
+  api = "strava",
+  coord_system = "gps",
+  token_path = "~/strava_tokens.json",
+  stream_extra = c(
+    heartrate = "heartrate",
+    distance = "distance"
+  )
+)
+
+run <- initiate(
+  session = "18529469417",
+  template = template
+)
+```
+
+## Generic REST API
+
+```{r}
+template <- api_stream_template(
+  api = "generic",
+  coord_system = "gps",
+  url = "https://example.com/api/session/{session}/samples",
+  request_method = "GET",
+  auth_type = "bearer",
+  auth_value = "$EXAMPLE_ACCESS_TOKEN",
+  response_format = "records",
+  time_type = "iso8601",
+  stream_time = "timestamp",
+  stream_lat = "lat",
+  stream_lng = "lng",
+  stream_extra = c(
+    heartrate = "heart_rate"
+  )
+)
+
+run <- initiate(
+  session = "abc123",
+  template = template
+)
+```
+
+
+# Saving and Reusing API Templates
+
+One of the major advantages of the `motiongrammar` API template system is reproducibility. Rather than redefining API mappings every session, you can save your configuration externally and reload it later.
+
+This is especially useful when:
+
+- working across multiple computers,
+- sharing pipelines with collaborators,
+- maintaining production workflows,
+- standardising imports across seasons/projects,
+- or connecting to APIs with complicated schemas.
+
+## Example: Saving a Strava Template
+
+```r
+strava_template <- api_stream_template(
+  api = "strava",
+  coord_system = "gps",
+  token_path = "~/strava_tokens.json",
+
+  stream_extra = c(
+    heartrate = "heartrate",
+    cadence = "cadence",
+    velocity_smooth = "velocity_smooth",
+    distance = "distance"
+  )
+)
+```
+
+Save the template:
+
+```r
+save_api_stream_template(
+  strava_template,
+  "templates/strava_running.xml"
+)
+```
+
+This creates an external XML template file describing:
+
+- API source
+- authentication structure
+- stream mappings
+- coordinate system
+- requested fields
+
+The benefit is that your ingestion schema is now fixed and reproducible.
+
+## Loading the Template Later
+
+At a later date — or on another machine — simply load the template:
+
+```r
+x <- initiate(
+  session = "18529469417",
+  template = "templates/strava_running.xml"
+)
+```
+
+The template file is automatically detected and loaded internally.
+
+This means the user does not need to manually redefine:
+
+- stream mappings,
+- auth settings,
+- requested variables,
+- or coordinate system logic.
+
+The ingestion becomes:
+
+```r
+initiate(
+  session = activity_id,
+  template = saved_template
+)
+```
+
+which guarantees consistency across analyses.
+
+## Why This Matters
+
+This becomes particularly important for:
+
+### Longitudinal Research
+
+You do not want stream mappings changing midway through a project because of:
+- renamed variables,
+- API changes,
+- or human error.
+
+### Shared Pipelines
+
+A collaborator can simply receive:
+- the XML template,
+- their own token file,
+- and the same analysis scripts.
+
+### Production Systems
+
+For automated ETL pipelines, templates act as a stable contract between:
+- the API source,
+- the ingestion layer,
+- and downstream analysis.
+
+## Beyond Strava
+
+This same workflow can be used for virtually any REST API.
+
+Examples include:
+
+- Google Takeout exports
+- Garmin APIs
+- Oura APIs
+- WHOOP APIs
+- Catapult cloud exports
+- internal biomechanics APIs
+- Snowflake-backed endpoints
+- wearable streaming systems
+
+For example, a lab may define a canonical template for:
+- IMU accelerometry,
+- GPS traces,
+- heart-rate telemetry,
+- or positional tracking,
+
+then distribute that template across all analysts to ensure:
+- consistent naming,
+- consistent coordinate systems,
+- and reproducible ingestion.
+
+In this sense, templates become a portable "grammar" describing how motion data should be interpreted.
