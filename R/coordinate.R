@@ -30,6 +30,113 @@ coord_conversions <- function(from_units = NULL, to_units = 'm'){
   conversions
 }
 
+# segment name: crs_validation ---
+
+#' Suggest the local UTM zone EPSG code for a dataset
+#'
+#' Uses the median lat/lng of the data to identify the appropriate UTM zone
+#' for high-precision local metric work (sports science, biomechanics). Pass
+#' the returned EPSG code to \code{\link{coordinate}()} via \code{crs}.
+#'
+#' @param .data A \code{motion_trace} or any data frame with \code{lat} and
+#'   \code{lng} columns.
+#' @return The EPSG integer code, invisibly. Also prints the zone details.
+#' @export
+utm_zone_suggest <- function(.data) {
+  if (!all(c("lat", "lng") %in% names(.data)))
+    stop("utm_zone_suggest(): data must contain 'lat' and 'lng' columns")
+
+  valid_lat <- .data$lat[!is.na(.data$lat)]
+  valid_lng <- .data$lng[!is.na(.data$lng)]
+
+  if (length(valid_lat) == 0 || length(valid_lng) == 0)
+    stop("utm_zone_suggest(): no valid lat/lng values found")
+
+  med_lat <- median(valid_lat)
+  med_lng <- median(valid_lng)
+
+  zone    <- floor((med_lng + 180) / 6) + 1
+  hem     <- if (med_lat >= 0) "N" else "S"
+  epsg    <- if (med_lat >= 0) 32600L + zone else 32700L + zone
+
+  # Scale error relative to Web Mercator at this latitude
+  merc_err_pct <- round((1 / cos(abs(med_lat) * pi / 180) - 1) * 100, 1)
+
+  cat(sprintf(
+    "Median position : %.3f°%s, %.3f°%s\n",
+    abs(med_lat), if (med_lat >= 0) "N" else "S",
+    abs(med_lng), if (med_lng >= 0) "E" else "W"
+  ))
+  cat(sprintf("Local UTM zone  : Zone %d%s  →  EPSG:%d\n", zone, hem, epsg))
+  cat(sprintf("Scale error (vs EPSG:3857): ~%s%% → <0.1%%\n", merc_err_pct))
+  cat(sprintf("\nUse: coordinate(.data, crs = %d)\n", epsg))
+
+  invisible(epsg)
+}
+
+#' Validate the target CRS and warn about metric distortions
+#'
+#' Called internally by \code{\link{coordinate}()} when \code{from = 'latlong'}.
+#' Stops on degree-unit CRS (EPSG:4326) and warns on Web Mercator (EPSG:3857)
+#' unless distortion is trivially small (< 0.5%).
+#'
+#' @param .data Data frame with \code{lat} and \code{lng} columns.
+#' @param crs Numeric; CRS code.
+#' @param from Character; source coordinate type.
+#' @keywords internal
+.crs_check <- function(.data, crs, from) {
+
+  if (from != 'latlong') return(invisible(NULL))
+
+  crs_int <- as.integer(crs)
+
+  # ── Hard error: EPSG:4326 — units are degrees, not metres ─────────────────
+  if (crs_int == 4326L) {
+    stop(
+      "coordinate(): crs = 4326 (WGS84 geographic) produces coordinates in\n",
+      "  decimal degrees, not metres. Derivatives (velocity, acceleration,\n",
+      "  player load) would be in degrees/second and are meaningless.\n\n",
+      "  Specify a metric projected CRS. Run utm_zone_suggest(.data) to find\n",
+      "  the appropriate UTM zone EPSG code for your data's location.",
+      call. = FALSE
+    )
+  }
+
+  # ── Warning: EPSG:3857 Web Mercator — metric but not true ground metres ────
+  if (crs_int == 3857L) {
+    valid_lat <- .data$lat[!is.na(.data$lat)]
+    if (length(valid_lat) == 0) return(invisible(NULL))
+
+    med_lat_abs <- abs(median(valid_lat))
+    scale_err   <- 1 / cos(med_lat_abs * pi / 180) - 1
+    pct_err     <- round(scale_err * 100, 1)
+
+    # Below 0.5% the distortion is sub-athletic — skip the warning
+    if (pct_err < 0.5) return(invisible(NULL))
+
+    valid_lng <- .data$lng[!is.na(.data$lng)]
+    med_lng   <- median(valid_lng)
+    zone      <- floor((med_lng + 180) / 6) + 1
+    hem       <- if (median(valid_lat) >= 0) "N" else "S"
+    epsg_utm  <- if (median(valid_lat) >= 0) 32600L + zone else 32700L + zone
+
+    warning(
+      "coordinate(): crs = 3857 (Web Mercator) introduces a ~", pct_err, "% metric\n",
+      "  scale distortion at your data's median latitude (~", round(med_lat_abs, 1), "°).\n",
+      "  Projected distances are stretched by this factor, so velocity,\n",
+      "  acceleration, and player load will all be inflated by ~", pct_err, "%.\n\n",
+      "  Recommended: use a conformal metric projection for your region:\n",
+      "    crs = ", epsg_utm, "  (UTM Zone ", zone, hem, " — distortion < 0.1%)\n\n",
+      "    coordinate(.data, crs = ", epsg_utm, ")\n\n",
+      "  Run utm_zone_suggest(.data) to confirm the EPSG code for your location.\n",
+      "  To silence: pass crs explicitly, e.g.  crs = ", epsg_utm, ".",
+      call. = FALSE
+    )
+  }
+
+  invisible(NULL)
+}
+
 # segment name: coord_project ---
 
 #' Project or convert coordinate data
@@ -398,11 +505,20 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
 
 # segment name: coordinate ---
 
-#' Convert latitude and longitude to xy (and z if we have it from altitude) metrics
+#' Convert latitude and longitude to projected XY metric coordinates
 #'
-#' @param from Character: usually 'latlong'
-#' @param to Character: usually 'xyz'
-#' @param crs Number: GPS system, defaults to most common
+#' @param from Character: source coordinate type. Usually \code{'latlong'}.
+#' @param to Character: target coordinate type. Usually \code{'xyz'}.
+#' @param crs Integer; EPSG code of the target projected CRS. Defaults to
+#'   \code{3857} (Web Mercator) for backwards compatibility, but
+#'   \strong{EPSG:3857 is not recommended for athletic kinematics}: its metric
+#'   scale inflates distances by \code{1/cos(lat)} relative to true ground
+#'   metres (~30\% error at 40°N). Specify a local UTM zone for high-precision
+#'   velocity, acceleration, and player-load calculations. Use
+#'   \code{\link{utm_zone_suggest}(.data)} to identify the correct EPSG code
+#'   for your data's location (e.g. \code{32618} for UTM Zone 18N / New York,
+#'   \code{32630} for UTM Zone 30N / London). \code{crs = 4326} (degree units)
+#'   is rejected with an error.
 #' @param norm Logical or Numeric; if TRUE, anchors the trace so the first row is (0,0,0). If a numeric vector (e.g. c(x, y)), sets a custom absolute origin.
 #' @param from_units Character; the units of the source ('m', 'cm', 'mm', 'km', 'ft', 'in', 'yd', 'mi').
 #' @param to_units Character; the units of the target. Defaults to 'm'.
@@ -423,6 +539,8 @@ coordinate <- function(.data,
   validate_motion_trace(.data, 'coordinate')
   rows_before <- nrow(.data)
   cols_before <- names(.data)
+
+  .crs_check(.data, crs, from)
   conversions <- coord_conversions(from_units, to_units)
 
   output <- coord_drop_zero_gps(.data)

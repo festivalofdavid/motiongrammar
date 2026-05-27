@@ -18,13 +18,12 @@ get_valid_tokens <- function(tokens,
     message('Refreshing Strava tokens...')
   }
 
-  resp <- httr2::request('https://www.strava.com/oauth/token') |>
+  req <- httr2::request('https://www.strava.com/oauth/token') |>
     httr2::req_body_form(client_id = tokens$client_id,
       client_secret = tokens$client_secret,
       grant_type = 'refresh_token',
-      refresh_token = tokens$refresh_token) |>
-    httr2::req_perform() |>
-    httr2::resp_body_json()
+      refresh_token = tokens$refresh_token)
+  resp <- httr2::resp_body_json(.safe_perform(req, "Strava token refresh"))
 
   tokens$access_token <- resp$access_token
   tokens$refresh_token <- resp$refresh_token
@@ -82,12 +81,11 @@ get_physics_streams <- function(activity_id,
   ))
   keys_vec <- keys_vec[!is.na(keys_vec)]
 
-  resp <- httr2::request(url) |>
+  req <- httr2::request(url) |>
     httr2::req_auth_bearer_token(access_token) |>
     httr2::req_url_query(keys = paste(keys_vec, collapse = ","),
-                         key_by_type = 'true') |>
-    httr2::req_perform() |>
-    httr2::resp_body_json()
+                         key_by_type = 'true')
+  resp <- httr2::resp_body_json(.safe_perform(req, "Strava streams fetch"))
 
   start_unix <- as.numeric(lubridate::as_datetime(start_time_iso))
   n_rows <- if (length(resp) > 0) length(resp[[1]]$data) else 0L
@@ -133,6 +131,15 @@ get_physics_streams <- function(activity_id,
   }
 
   extra_cols <- setdiff(names(output), core_cols)
+
+  if (!is.null(t$stream_extra) && length(t$stream_extra) > 0) {
+    extra_nms_all <- names(t$stream_extra)
+    out_names_extra <- vapply(seq_along(t$stream_extra), function(i) {
+      if (!is.null(extra_nms_all) && nchar(extra_nms_all[i]) > 0) extra_nms_all[i] else t$stream_extra[[i]]
+    }, character(1))
+    .check_extra_collision(out_names_extra, "strava")
+  }
+
   tibble::as_tibble(output[c(core_cols, extra_cols)])
 }
 
@@ -586,6 +593,169 @@ initiate_gpx <- function(.data_path){
 #' @keywords internal
 `%||%` <- function(a, b){
   if(is.null(a)) b else a
+}
+
+#' Pipeline-reserved column names produced by derivate() and designate()
+#' @keywords internal
+.mg_pipeline_reserved <- c(
+  'distance', 'velocity', 'acceleration', 'heading',
+  'angular_velocity', 'jerk', 'lateral_g', 'designation'
+)
+
+#' Warn on reserved column name collision in user-supplied extra columns
+#' @keywords internal
+.check_extra_collision <- function(output_names, api_label = "api") {
+  hits <- intersect(output_names, .mg_pipeline_reserved)
+  for (nm in hits) {
+    warning(
+      "External field '", nm, "' conflicts with a reserved motiongrammar pipeline output.\n",
+      "  derivate() / designate() will overwrite it. ",
+      "Consider renaming to '", api_label, "_", nm,
+      "' in your template's stream_extra / col_extra.",
+      call. = FALSE
+    )
+  }
+}
+
+#' httr2 req_perform wrapper with human-readable HTTP error messages
+#' @keywords internal
+.safe_perform <- function(req, context = "API request") {
+  # Specific HTTP status handlers are listed first; no generic error handler
+  # to avoid double-wrapping (R tryCatch re-matches inner stop() calls).
+  tryCatch(
+    httr2::req_perform(req),
+    httr2_http_401 = function(e) stop(
+      context, " failed: authentication error (401 Unauthorized).\n\n",
+      "Check:\n",
+      "  - token validity\n",
+      "  - refresh token\n",
+      "  - client credentials\n",
+      "  - internet connection",
+      call. = FALSE
+    ),
+    httr2_http_403 = function(e) stop(
+      context, " failed: access forbidden (403 Forbidden).\n\n",
+      "Check:\n",
+      "  - token scopes / permissions\n",
+      "  - account access level",
+      call. = FALSE
+    ),
+    httr2_http_404 = function(e) stop(
+      context, " failed: resource not found (404 Not Found).\n\n",
+      "Check:\n",
+      "  - session / activity ID\n",
+      "  - API endpoint URL",
+      call. = FALSE
+    ),
+    httr2_http_429 = function(e) stop(
+      context, " failed: rate limited (429 Too Many Requests).\n\n",
+      "Wait before retrying or check your API quota.",
+      call. = FALSE
+    ),
+    httr2_http = function(e) stop(
+      context, " failed:\n", conditionMessage(e),
+      call. = FALSE
+    )
+  )
+}
+
+#' Generic OAuth2 token refresh (any provider)
+#'
+#' Loads tokens from a JSON file, refreshes if expired, and saves back.
+#' Token file must contain \code{refresh_token}; may contain
+#' \code{client_id}, \code{client_secret}, and \code{expires_at}.
+#'
+#' @param token_url Character; the OAuth2 token endpoint URL.
+#' @param token_path Character; path to the JSON credentials file.
+#' @param client_id Character or NULL; overrides the value in the JSON.
+#'   A leading \code{$} reads from an environment variable.
+#' @param client_secret Character or NULL; same env-var semantics.
+#' @param verbose Logical; if TRUE, prints refresh status.
+#' @return A list containing at least \code{access_token}.
+#' @keywords internal
+get_valid_token_oauth2 <- function(token_url,
+                                   token_path,
+                                   client_id = NULL,
+                                   client_secret = NULL,
+                                   verbose = TRUE) {
+
+  resolve_secret <- function(val) {
+    if (!is.null(val) && nchar(val) > 0 && startsWith(val, "$")) {
+      env_nm <- substring(val, 2)
+      resolved <- Sys.getenv(env_nm, unset = NA_character_)
+      if (is.na(resolved) || !nchar(resolved))
+        stop("oauth2: environment variable '", env_nm, "' is not set.", call. = FALSE)
+      return(resolved)
+    }
+    val
+  }
+
+  path_exp <- path.expand(token_path)
+  if (!file.exists(path_exp))
+    stop(
+      "oauth2: token file not found: ", path_exp, "\n\n",
+      "Obtain credentials from your API provider and save them as JSON:\n",
+      "  {\"access_token\": \"...\", \"refresh_token\": \"...\", \"expires_at\": ...,\n",
+      "   \"client_id\": \"...\", \"client_secret\": \"...\"}",
+      call. = FALSE
+    )
+
+  tokens <- jsonlite::fromJSON(path_exp)
+  now <- as.integer(Sys.time())
+
+  if (!is.null(tokens$expires_at) && (tokens$expires_at - now) > 120)
+    return(tokens)
+
+  if (verbose) message("Refreshing OAuth2 tokens...")
+
+  cid  <- resolve_secret(client_id  %||% tokens$client_id)
+  csec <- resolve_secret(client_secret %||% tokens$client_secret)
+
+  if (is.null(cid)  || !nchar(cid))
+    stop("oauth2: client_id not found. ",
+         "Provide it via oauth2_client_id in the template or add 'client_id' to the token JSON.",
+         call. = FALSE)
+  if (is.null(csec) || !nchar(csec))
+    stop("oauth2: client_secret not found. ",
+         "Provide it via oauth2_client_secret in the template or add 'client_secret' to the token JSON.",
+         call. = FALSE)
+  if (is.null(tokens$refresh_token) || !nchar(tokens$refresh_token))
+    stop("oauth2: refresh_token not found in token file: ", path_exp, call. = FALSE)
+
+  resp <- tryCatch(
+    httr2::request(token_url) |>
+      httr2::req_body_form(
+        client_id     = cid,
+        client_secret = csec,
+        grant_type    = "refresh_token",
+        refresh_token = tokens$refresh_token
+      ) |>
+      httr2::req_perform() |>
+      httr2::resp_body_json(),
+    httr2_http_400 = function(e)
+      stop("oauth2 token refresh failed (400 Bad Request).\n\n",
+           "Check:\n",
+           "  - refresh_token is still valid (may have expired or been revoked)\n",
+           "  - client_id and client_secret are correct",
+           call. = FALSE),
+    httr2_http_401 = function(e)
+      stop("oauth2 token refresh failed (401 Unauthorized).\n\n",
+           "Check:\n",
+           "  - client_id and client_secret are correct\n",
+           "  - token endpoint: ", token_url,
+           call. = FALSE),
+    error = function(e) stop("oauth2 token refresh failed: ", conditionMessage(e), call. = FALSE)
+  )
+
+  tokens$access_token <- resp$access_token
+  if (!is.null(resp$refresh_token)) tokens$refresh_token <- resp$refresh_token
+  tokens$expires_at <- if (!is.null(resp$expires_in))
+    now + as.integer(resp$expires_in)
+  else
+    resp$expires_at %||% tokens$expires_at
+
+  writeLines(jsonlite::toJSON(tokens, auto_unbox = TRUE, pretty = TRUE), path_exp)
+  tokens
 }
 
 #' Validate a motion_trace Object
@@ -1810,10 +1980,13 @@ initiate <- function(source = 'auto',
         verbose = verbose
       )
 
-      meta <- httr2::request(paste0('https://www.strava.com/api/v3/activities/', activity_id)) |>
-        httr2::req_auth_bearer_token(tokens$access_token) |>
-        httr2::req_perform() |>
-        httr2::resp_body_json()
+      meta <- httr2::resp_body_json(
+        .safe_perform(
+          httr2::request(paste0('https://www.strava.com/api/v3/activities/', activity_id)) |>
+            httr2::req_auth_bearer_token(tokens$access_token),
+          "Strava activity fetch"
+        )
+      )
 
       trace <- get_physics_streams(activity_id, tokens$access_token, meta$start_date,
                                    template = api_tmpl)
@@ -2708,11 +2881,14 @@ initiate_template_csv <- function(.data_path, template) {
   if (!is.null(acc_idx))
     output[["acceleration"]] <- parse_num(df[[acc_idx]])
 
-  # Extra columns: try numeric, fall back to character if mostly NA
-  for (er in extra_resolved) {
-    raw <- df[[er$idx]]
-    num_attempt <- parse_num(raw)
-    output[[er$name]] <- if (mean(is.na(num_attempt)) <= 0.5) num_attempt else raw
+  # Extra columns: check for reserved column collisions, then import
+  if (length(extra_resolved) > 0) {
+    .check_extra_collision(vapply(extra_resolved, `[[`, character(1), "name"), "csv")
+    for (er in extra_resolved) {
+      raw <- df[[er$idx]]
+      num_attempt <- parse_num(raw)
+      output[[er$name]] <- if (mean(is.na(num_attempt)) <= 0.5) num_attempt else raw
+    }
   }
 
   # NA diagnostics
@@ -2877,14 +3053,20 @@ api_stream_template <- function(
     request_method = c("GET", "POST"),
     request_params = NULL,
     request_body = NULL,
-    auth_type = c("none", "bearer", "api_key_header", "api_key_query"),
+    auth_type = c("none", "bearer", "api_key_header", "api_key_query", "oauth2_refresh"),
     auth_value = NULL,
     auth_header = "X-API-Key",
     auth_param = "api_key",
+    # OAuth2 refresh fields (used when auth_type = "oauth2_refresh")
+    oauth2_token_url = NULL,
+    oauth2_client_id = NULL,
+    oauth2_client_secret = NULL,
+    oauth2_token_path = NULL,
     response_format = c("records", "columnar", "streams"),
     data_path = NULL,
     stream_data_key = "data",
-    time_type = c("unix", "iso8601"),
+    time_type = c("unix", "iso8601", "relative"),
+    time_origin = NULL,
     # Stream/field mapping (all APIs)
     stream_time = NULL,
     stream_latlng = NULL,
@@ -2923,8 +3105,19 @@ api_stream_template <- function(
   if (api == "generic" && (is.null(url) || !nchar(url)))
     stop("api_stream_template(): url is required when api = 'generic'")
 
-  if (auth_type != "none" && (is.null(auth_value) || !nchar(auth_value)))
+  non_oauth2_auth <- c("bearer", "api_key_header", "api_key_query")
+  if (auth_type %in% non_oauth2_auth && (is.null(auth_value) || !nchar(auth_value)))
     stop("api_stream_template(): auth_value is required when auth_type = '", auth_type, "'")
+
+  if (auth_type == "oauth2_refresh") {
+    if (is.null(oauth2_token_url) || !nchar(oauth2_token_url))
+      stop("api_stream_template(): oauth2_token_url is required when auth_type = 'oauth2_refresh'")
+    if (is.null(oauth2_token_path) || !nchar(oauth2_token_path))
+      stop("api_stream_template(): oauth2_token_path is required when auth_type = 'oauth2_refresh'")
+  }
+
+  if (time_type == "relative" && !is.null(time_origin) && !is.numeric(time_origin))
+    stop("api_stream_template(): time_origin must be a numeric Unix timestamp")
 
   if (coord_system == "gps") {
     if (is.null(stream_latlng) && (is.null(stream_lat) || is.null(stream_lng)))
@@ -2952,10 +3145,16 @@ api_stream_template <- function(
       auth_value = if (!is.null(auth_value)) as.character(auth_value) else NULL,
       auth_header = as.character(auth_header),
       auth_param = as.character(auth_param),
+      # OAuth2 refresh
+      oauth2_token_url    = if (!is.null(oauth2_token_url))    as.character(oauth2_token_url)    else NULL,
+      oauth2_client_id    = if (!is.null(oauth2_client_id))    as.character(oauth2_client_id)    else NULL,
+      oauth2_client_secret = if (!is.null(oauth2_client_secret)) as.character(oauth2_client_secret) else NULL,
+      oauth2_token_path   = if (!is.null(oauth2_token_path))   as.character(oauth2_token_path)   else NULL,
       response_format = response_format,
       data_path = if (!is.null(data_path)) as.character(data_path) else NULL,
       stream_data_key = as.character(stream_data_key),
       time_type = time_type,
+      time_origin = if (!is.null(time_origin)) as.numeric(time_origin) else NULL,
       # Field mapping
       stream_time = as.character(stream_time),
       stream_latlng = if (!is.null(stream_latlng))       as.character(stream_latlng)       else NULL,
@@ -2983,7 +3182,13 @@ print.api_stream_template <- function(x, ...) {
   } else {
     cat(sprintf("  URL:         %s\n", x$url))
     cat(sprintf("  Method:      %s\n", x$request_method))
-    if (x$auth_type != "none") {
+    if (x$auth_type == "oauth2_refresh") {
+      cid_disp <- if (!is.null(x$oauth2_client_id) && startsWith(x$oauth2_client_id, "$"))
+        x$oauth2_client_id else "<set>"
+      cat(sprintf("  Auth:        oauth2_refresh  (token: %s  client_id: %s)\n",
+                  x$oauth2_token_path %||% "?", cid_disp))
+      cat(sprintf("  Token URL:   %s\n", x$oauth2_token_url %||% "?"))
+    } else if (x$auth_type != "none") {
       disp_val <- if (!is.null(x$auth_value) && startsWith(x$auth_value, "$"))
         x$auth_value
       else
@@ -2992,7 +3197,10 @@ print.api_stream_template <- function(x, ...) {
     }
     cat(sprintf("  Response:    %s", x$response_format))
     if (!is.null(x$data_path)) cat(sprintf("  (path: %s)", x$data_path))
-    cat(sprintf("  |  time_type: %s\n", x$time_type))
+    time_str <- x$time_type
+    if (x$time_type == "relative" && !is.null(x$time_origin))
+      time_str <- sprintf("relative (origin: %.0f)", x$time_origin)
+    cat(sprintf("  |  time_type: %s\n", time_str))
   }
 
   cat("  Stream mapping:\n")
@@ -3061,11 +3269,16 @@ save_api_stream_template <- function(template, path) {
     add_tag("auth_value",  template$auth_value,  "    "),
     add_tag("auth_header", template$auth_header, "    "),
     add_tag("auth_param",  template$auth_param,  "    "),
+    add_tag("oauth2_token_url",    template$oauth2_token_url,    "    "),
+    add_tag("oauth2_client_id",    template$oauth2_client_id,    "    "),
+    add_tag("oauth2_client_secret", template$oauth2_client_secret, "    "),
+    add_tag("oauth2_token_path",   template$oauth2_token_path,   "    "),
     "  </auth>",
     "  <response>",
     add_tag("response_format", template$response_format, "    "),
     add_tag("stream_data_key", template$stream_data_key, "    "),
     add_tag("time_type",       template$time_type,       "    "),
+    add_tag("time_origin",     template$time_origin,     "    "),
     "  </response>",
     "  <streams>",
     add_tag("stream_time",         template$stream_time,         "    "),
@@ -3147,10 +3360,16 @@ load_api_stream_template <- function(path) {
   auth_value <- get_tag("auth_value",  auth_section)
   auth_header <- get_tag("auth_header", auth_section) %||% "X-API-Key"
   auth_param <- get_tag("auth_param",  auth_section) %||% "api_key"
+  oauth2_token_url    <- get_tag("oauth2_token_url",    auth_section)
+  oauth2_client_id    <- get_tag("oauth2_client_id",    auth_section)
+  oauth2_client_secret <- get_tag("oauth2_client_secret", auth_section)
+  oauth2_token_path   <- get_tag("oauth2_token_path",   auth_section)
 
   response_format <- get_tag("response_format", response_section) %||% "records"
   stream_data_key <- get_tag("stream_data_key", response_section) %||% "data"
   time_type <- get_tag("time_type",       response_section) %||% "unix"
+  time_origin_raw <- get_tag("time_origin", response_section)
+  time_origin <- if (!is.null(time_origin_raw)) as.numeric(time_origin_raw) else NULL
 
   stream_time <- get_tag("stream_time",         streams_section)
   stream_latlng <- get_tag("stream_latlng",       streams_section)
@@ -3197,10 +3416,15 @@ load_api_stream_template <- function(path) {
       auth_value = auth_value,
       auth_header = auth_header,
       auth_param = auth_param,
+      oauth2_token_url    = oauth2_token_url,
+      oauth2_client_id    = oauth2_client_id,
+      oauth2_client_secret = oauth2_client_secret,
+      oauth2_token_path   = oauth2_token_path,
       response_format = response_format,
       data_path = data_path,
       stream_data_key = stream_data_key,
       time_type = time_type,
+      time_origin = time_origin,
       stream_time = stream_time,
       stream_latlng = stream_latlng,
       stream_lat = stream_lat,
@@ -3226,19 +3450,36 @@ fetch_generic_streams <- function(session, template) {
   # ── Build URL ─────────────────────────────────────────────────────────────
   url <- gsub("{session}", as.character(session), t$url, fixed = TRUE)
 
-  # ── Resolve auth_value (env var support) ─────────────────────────────────
-  auth_val <- t$auth_value
-  if (!is.null(auth_val) && startsWith(auth_val, "$")) {
-    env_var <- substring(auth_val, 2)
-    auth_val <- Sys.getenv(env_var, unset = NA_character_)
-    if (is.na(auth_val) || !nchar(auth_val))
-      stop(sprintf("fetch_generic_streams(): environment variable '%s' is not set", env_var))
+  # ── Resolve credentials ───────────────────────────────────────────────────
+  resolve_env <- function(val, label) {
+    if (!is.null(val) && nchar(val) > 0 && startsWith(val, "$")) {
+      env_nm <- substring(val, 2)
+      resolved <- Sys.getenv(env_nm, unset = NA_character_)
+      if (is.na(resolved) || !nchar(resolved))
+        stop("fetch_generic_streams(): environment variable '", env_nm,
+             "' (", label, ") is not set.", call. = FALSE)
+      return(resolved)
+    }
+    val
+  }
+
+  # ── Handle oauth2_refresh ─────────────────────────────────────────────────
+  if (t$auth_type == "oauth2_refresh") {
+    oauth_tokens <- get_valid_token_oauth2(
+      token_url    = t$oauth2_token_url,
+      token_path   = t$oauth2_token_path,
+      client_id    = t$oauth2_client_id,
+      client_secret = t$oauth2_client_secret
+    )
+    auth_val <- oauth_tokens$access_token
+  } else {
+    auth_val <- resolve_env(t$auth_value, "auth_value")
   }
 
   # ── Build request ─────────────────────────────────────────────────────────
   req <- httr2::request(url)
 
-  if (t$auth_type == "bearer") {
+  if (t$auth_type %in% c("bearer", "oauth2_refresh")) {
     req <- httr2::req_auth_bearer_token(req, auth_val)
   } else if (t$auth_type == "api_key_header") {
     req <- do.call(httr2::req_headers, c(list(req), stats::setNames(list(auth_val), t$auth_header)))
@@ -3255,14 +3496,19 @@ fetch_generic_streams <- function(session, template) {
     req <- httr2::req_method(req, "POST")
   }
 
-  resp <- req |> httr2::req_perform() |> httr2::resp_body_json()
+  resp <- httr2::resp_body_json(.safe_perform(req, "Generic API request"))
 
   # ── Navigate to data node ─────────────────────────────────────────────────
   data <- resp
   if (!is.null(t$data_path) && nchar(t$data_path) > 0) {
     for (key in strsplit(t$data_path, ".", fixed = TRUE)[[1]]) {
-      if (is.null(data[[key]]))
-        stop(sprintf("fetch_generic_streams(): data_path key '%s' not found in response", key))
+      if (is.null(data[[key]])) {
+        available <- paste(names(data), collapse = ", ")
+        stop(sprintf(
+          "fetch_generic_streams(): data_path key '%s' not found in response.\n\nAvailable keys:\n  %s",
+          key, available
+        ), call. = FALSE)
+      }
       data <- data[[key]]
     }
   }
@@ -3272,15 +3518,19 @@ fetch_generic_streams <- function(session, template) {
 
     "records" = {
       if (!is.list(data) || length(data) == 0)
-        stop("fetch_generic_streams(): response_format = 'records' expects a non-empty array")
-      field_names <- names(data[[1]])
-      result <- lapply(field_names, function(nm) {
+        stop("fetch_generic_streams(): response_format = 'records' expects a non-empty JSON array.\n\n",
+             "Check:\n",
+             "  - data_path points to the array (not a wrapper object)\n",
+             "  - the session ID / endpoint returns data",
+             call. = FALSE)
+      all_field_names <- unique(unlist(lapply(data, names)))
+      result <- lapply(all_field_names, function(nm) {
         vapply(data, function(rec) {
           val <- rec[[nm]]
           if (is.null(val)) NA_character_ else as.character(val[[1]])
         }, character(1))
       })
-      stats::setNames(result, field_names)
+      stats::setNames(result, all_field_names)
     },
 
     "columnar" = {
@@ -3293,22 +3543,31 @@ fetch_generic_streams <- function(session, template) {
     }
   )
 
-  n_rows <- length(raw_fields[[1]])
+  available_fields <- names(raw_fields)
+  n_rows <- if (length(raw_fields) > 0) length(raw_fields[[1]]) else 0L
   output <- list()
 
   # ── Time ──────────────────────────────────────────────────────────────────
   time_raw <- raw_fields[[t$stream_time]]
-  if (is.null(time_raw))
-    stop(sprintf("fetch_generic_streams(): stream_time '%s' not found in response", t$stream_time))
+  if (is.null(time_raw)) {
+    stop(sprintf(
+      "fetch_generic_streams(): stream '%s' not found in API response.\n\nAvailable streams:\n  %s",
+      t$stream_time, paste(available_fields, collapse = ", ")
+    ), call. = FALSE)
+  }
 
   output[["unix_time"]] <- switch(t$time_type,
-    "unix"    = as.numeric(time_raw),
-    "iso8601" = as.numeric(lubridate::as_datetime(time_raw)),
-    stop("fetch_generic_streams(): unsupported time_type '", t$time_type, "'")
+    "unix"     = as.numeric(time_raw),
+    "iso8601"  = as.numeric(lubridate::as_datetime(time_raw)),
+    "relative" = {
+      origin <- t$time_origin %||% 0
+      origin + as.numeric(time_raw)
+    },
+    stop("fetch_generic_streams(): unsupported time_type '", t$time_type, "'", call. = FALSE)
   )
 
   # ── Coordinates ───────────────────────────────────────────────────────────
-  # stream_latlng (combined pairs) only in streams/columnar where original data has pairs
+  # stream_latlng (combined pairs) only honoured in streams/columnar formats
   if (!is.null(t$stream_latlng) && t$response_format %in% c("streams", "columnar")) {
     pairs_src <- if (t$response_format == "streams") data[[t$stream_latlng]][[t$stream_data_key %||% "data"]]
                  else data[[t$stream_latlng]]
@@ -3317,15 +3576,36 @@ fetch_generic_streams <- function(session, template) {
       output[["lng"]] <- purrr::map_dbl(pairs_src, 2)
     }
   } else {
-    if (!is.null(t$stream_lat) && t$stream_lat %in% names(raw_fields))
-      output[["lat"]] <- as.numeric(raw_fields[[t$stream_lat]])
-    if (!is.null(t$stream_lng) && t$stream_lng %in% names(raw_fields))
-      output[["lng"]] <- as.numeric(raw_fields[[t$stream_lng]])
+    if (!is.null(t$stream_lat)) {
+      if (t$stream_lat %in% available_fields)
+        output[["lat"]] <- as.numeric(raw_fields[[t$stream_lat]])
+      else
+        warning(sprintf(
+          "stream_lat '%s' not found in API response. Available: %s",
+          t$stream_lat, paste(available_fields, collapse = ", ")
+        ), call. = FALSE)
+    }
+    if (!is.null(t$stream_lng)) {
+      if (t$stream_lng %in% available_fields)
+        output[["lng"]] <- as.numeric(raw_fields[[t$stream_lng]])
+      else
+        warning(sprintf(
+          "stream_lng '%s' not found in API response. Available: %s",
+          t$stream_lng, paste(available_fields, collapse = ", ")
+        ), call. = FALSE)
+    }
   }
 
   .map_field <- function(key, out_nm) {
-    if (!is.null(key) && key %in% names(raw_fields))
-      output[[out_nm]] <<- as.numeric(raw_fields[[key]])
+    if (!is.null(key)) {
+      if (key %in% available_fields)
+        output[[out_nm]] <<- as.numeric(raw_fields[[key]])
+      else
+        warning(sprintf(
+          "stream '%s' not found in API response. Available: %s",
+          key, paste(available_fields, collapse = ", ")
+        ), call. = FALSE)
+    }
   }
   .map_field(t$stream_altitude,     "altitude")
   .map_field(t$stream_x,            "x")
@@ -3337,13 +3617,23 @@ fetch_generic_streams <- function(session, template) {
   # ── Extra streams ─────────────────────────────────────────────────────────
   if (!is.null(t$stream_extra) && length(t$stream_extra) > 0) {
     extra_nms <- names(t$stream_extra)
+    out_names_extra <- vapply(seq_along(t$stream_extra), function(i) {
+      if (!is.null(extra_nms) && nchar(extra_nms[i]) > 0) extra_nms[i] else t$stream_extra[[i]]
+    }, character(1))
+    .check_extra_collision(out_names_extra, t$api %||% "api")
+
     for (i in seq_along(t$stream_extra)) {
       key <- t$stream_extra[[i]]
-      out_nm <- if (!is.null(extra_nms) && nchar(extra_nms[i]) > 0) extra_nms[i] else key
-      if (key %in% names(raw_fields)) {
+      out_nm <- out_names_extra[i]
+      if (key %in% available_fields) {
         raw <- raw_fields[[key]]
         num <- suppressWarnings(as.numeric(raw))
         output[[out_nm]] <- if (mean(is.na(num)) <= 0.5) num else raw
+      } else {
+        warning(sprintf(
+          "extra stream '%s' not found in API response. Available: %s",
+          key, paste(available_fields, collapse = ", ")
+        ), call. = FALSE)
       }
     }
   }

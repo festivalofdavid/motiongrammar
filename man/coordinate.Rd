@@ -2,7 +2,7 @@
 % Please edit documentation in R/coordinate.R
 \name{coordinate}
 \alias{coordinate}
-\title{Convert latitude and longitude to xy (and z if we have it from altitude) metrics}
+\title{Convert latitude and longitude to projected XY metric coordinates}
 \usage{
 coordinate(
   .data,
@@ -17,11 +17,20 @@ coordinate(
 )
 }
 \arguments{
-\item{from}{Character: usually 'latlong'}
+\item{from}{Character: source coordinate type. Usually \code{'latlong'}.}
 
-\item{to}{Character: usually 'xyz'}
+\item{to}{Character: target coordinate type. Usually \code{'xyz'}.}
 
-\item{crs}{Number: GPS system, defaults to most common}
+\item{crs}{Integer; EPSG code of the target projected CRS. Defaults to
+\code{3857} (Web Mercator) for backwards compatibility, but
+\strong{EPSG:3857 is not recommended for athletic kinematics}: its metric
+scale inflates distances by \code{1/cos(lat)} relative to true ground
+metres (~30\\% error at 40°N). Specify a local UTM zone for high-precision
+velocity, acceleration, and player-load calculations. Use
+\code{\link{utm_zone_suggest}(.data)} to identify the correct EPSG code
+for your data's location (e.g. \code{32618} for UTM Zone 18N / New York,
+\code{32630} for UTM Zone 30N / London). \code{crs = 4326} (degree units)
+is rejected with an error.}
 
 \item{norm}{Logical or Numeric; if TRUE, anchors the trace so the first row is (0,0,0). If a numeric vector (e.g. c(x, y)), sets a custom absolute origin.}
 
@@ -37,5 +46,5 @@ coordinate(
 An object of class \code{motion_trace}.
 }
 \description{
-Convert latitude and longitude to xy (and z if we have it from altitude) metrics
+Convert latitude and longitude to projected XY metric coordinates
 }

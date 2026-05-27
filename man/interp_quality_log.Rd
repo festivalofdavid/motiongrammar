@@ -21,7 +21,10 @@ interp_quality_log(
   n_remaining_na_y,
   gap_lengths,
   passthrough_na_counts = integer(0),
-  cols_before = NULL
+  passthrough_na_counts_after = integer(0),
+  cols_before = NULL,
+  numeric_passthrough = character(0),
+  non_numeric_passthrough = character(0)
 )
 }
 \arguments{
@@ -58,7 +61,17 @@ interp_quality_log(
 \item{passthrough_na_counts}{Named integer vector; for each non-coordinate column present
 in the input, the number of NAs introduced in time-gap rows inserted by grid expansion.}
 
+\item{passthrough_na_counts_after}{Named integer vector; NAs remaining per passthrough
+column after interpolation (numeric columns will have fewer than before; non-numeric
+columns will match the introduced count).}
+
 \item{cols_before}{Character vector; column names of the input before interpolation.}
+
+\item{numeric_passthrough}{Character vector; non-coordinate columns that are numeric and
+were interpolated alongside coordinates.}
+
+\item{non_numeric_passthrough}{Character vector; non-coordinate columns that are
+character/factor and were left as-is (NAs remain for inserted time-gap rows).}
 }
 \value{
 The motion_trace object with updated quality attribute.
