@@ -157,6 +157,26 @@ allocate_csv <- function(.data, file) {
     for (deriv in unique(p_rows$target_derivative)) {
       d_rows <- p_rows[p_rows$target_derivative == deriv, ]
       d_rows <- d_rows[order(d_rows$profile_start), ]
+
+      # Guard: each band's upper boundary must exactly meet the next band's
+      # lower boundary. A gap causes findInterval() to silently misclassify
+      # values that fall inside the gap (they get absorbed into the band below).
+      if (nrow(d_rows) > 1) {
+        ends   <- d_rows$profile_end[-nrow(d_rows)]
+        starts <- d_rows$profile_start[-1]
+        bad    <- which(ends != starts)
+        if (length(bad) > 0) {
+          stop(sprintf(
+            "allocate_csv(): non-contiguous thresholds in profile '%s' / derivative '%s'. ",
+            pname, deriv
+          ), sprintf(
+            "Band %d ends at %g but band %d starts at %g. ",
+            bad[1], ends[bad[1]], bad[1] + 1L, starts[bad[1]]
+          ), "Intervals must be contiguous (each band's upper bound must equal the next band's lower bound).",
+          call. = FALSE)
+        }
+      }
+
       # Include the final band's upper boundary so all N bands are created.
       # Without it, findInterval() sees N-1 intervals and the top band is lost.
       allocation[[deriv]] <- c(d_rows$profile_start, tail(d_rows$profile_end, 1))

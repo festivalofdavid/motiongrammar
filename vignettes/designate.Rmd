@@ -1,5 +1,5 @@
 ---
-title: "Designate: Segmenting a Session into Episodes"
+title: "Designate: Segmenting a Session Into Drills, Periods or Stints"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{Designate: Segmenting a Session into Episodes}
@@ -39,8 +39,9 @@ trace_pre <- initiate(
 ```
 
 `designate()` partitions a continuous motion trace into labelled
-"sections", active bouts of movement, drills or game intervals, and
-relief periods. Quantitate can summarise each section separately.
+"sections" or active bouts of movement. What this means it up to you! It
+could be drills, game intervals, stints, relief periods.... Quantitate
+can summarise each section separately.
 
 ------------------------------------------------------------------------
 
@@ -55,11 +56,14 @@ summary row.
 Chances are, you have designations (for example drill names) in your
 providers file. That's great! If that's the case, it makes total sense
 to preserve those columns at the *initiate* phase and group by them.
-Designate is built with automatic detection in mind (using a variation
-on my PhD methods), as well as for instances where labels may be stored
-in a separate csv. Drills are the most obvious thing we would designate
-by, but you could also use this to look at any tagged event or context
-from Sportscode.
+This is an excellent use case of an additional field you would want to
+preserve in your template.
+
+Designate is built with automatic detection as an option (using a
+variation on my PhD methods), as well as for instances where labels may
+be stored in a separate csv. Drills are the most obvious thing we would
+designate by, but you could also use this to look at any tagged event or
+context from Sportscode.
 
 ------------------------------------------------------------------------
 
@@ -103,7 +107,7 @@ trace |>
   ggplot(aes(x = unix_time, y = velocity, colour = designation)) +
   geom_line(linewidth = 0.4) +
   scale_colour_manual(
-    values = c(active_1 = "steelblue", relief_1 = "firebrick2"),
+    values = c(active_1 = "#2B7C85", relief_1 = "#FF6F59"),
     na.value = "grey70"
   ) +
   labs(
@@ -113,7 +117,7 @@ trace |>
     colour = "Segment"
   ) +
   theme_minimal() +
-  theme(panel.grid = element_blank(), legend.position = "top")
+  theme(panel.grid = element_blank(), legend.position = "bottom")
 ```
 
 ```{r designate-field, fig.height=5}
@@ -124,7 +128,7 @@ trace |>
   geom_path(linewidth = 1.0, alpha = 0.8) +
   coord_fixed() +
   scale_colour_manual(
-    values = c(active_1 = "steelblue", relief_1 = "firebrick2"),
+    values = c(active_1 = "#2B7C85", relief_1 = "#FF6F59"),
     na.value = "grey70"
   ) +
   labs(
@@ -132,30 +136,32 @@ trace |>
     x      = "x (m)", y = "y (m)", colour = NULL
   ) +
   theme_minimal() +
-  theme(panel.grid = element_blank(), legend.position = "top")
+  theme(panel.grid = element_blank(), legend.position = "bottom")
 ```
 
 ### How the algorithm works
 
-1.  **PELT segmentation.** The velocity signal is scanned for points
+1.  **PELT segmentation:** The velocity signal is scanned for points
     where the mean changes abruptly (SIC penalty prevents
     over-segmentation).
-2.  **Active vs relief classification.** Segments with mean velocity
-    below `v_threshold` → relief; above → active.
-3.  **Short-segment merging.** Segments shorter than `min_pts` rows are
+2.  **Active vs relief classification:** Segments with mean velocity
+    below `v_threshold` → relief; above → active. This is a heuristic
+    and will depend on your sport. It will need to be lower for court
+    based sports because players do not hit high velocities.
+3.  **Short-segment merging:** Segments shorter than `min_pts` rows are
     absorbed into their neighbour.
-4.  **Labelling.** Active segments → `active_1`, `active_2`, etc.;
+4.  **Labelling:** Active segments → `active_1`, `active_2`, etc.;
     relief → `relief_1`, `relief_2`, etc.
-5.  **Gap propagation.** Rows with NA velocity inherit the nearest
+5.  **Gap propagation:** Rows with NA velocity inherit the nearest
     neighbour's designation.
 
 ### Tuning `v_threshold`
 
-| Context                     | Suggested `v_threshold` |
-|-----------------------------|-------------------------|
-| Field sport (football, AFL) | 0.25–0.5 m/s            |
-| Road running / cycling      | 1.0–2.0 m/s             |
-| Court sport (netball)       | 0.25–0.5 m/s            |
+| Context                     | Possible suggested `v_threshold` |
+|-----------------------------|----------------------------------|
+| Field sport (football, AFL) | 0.25–0.5 m/s                     |
+| Road running / cycling      | 1.0–2.0 m/s                      |
+| Court sport (netball)       | 0.25–0.5 m/s                     |
 
 ------------------------------------------------------------------------
 
@@ -203,7 +209,10 @@ trace <- trace_pre |>
 
 ## 5. Exporting automatic designations
 
-Export the auto-generated intervals for review and correction:
+Let's say you tried automatic designation detection and it was "pretty
+good" but a little bit off. This is totally expected. You can export
+what the algorithm found, visually inspect it and manually change the
+designations.
 
 ```{r export}
 intervals <- export_designations(trace)
@@ -228,7 +237,8 @@ expects. A useful review loop:
 ## 6. Reading the quality log
 
 ```{r quality}
-quality_report(trace)
+quality_report(trace,
+               step = 'designate')
 ```
 
 For `method = 'corbett'`, the quality log records the number of
@@ -241,7 +251,7 @@ records the source file path and column mapping used.
 ## Quick reference
 
 | Argument | Default | Purpose |
-|----|----|----|
+|------------------------|------------------------|------------------------|
 | `method` | `"corbett"` | `"corbett"` (automatic) or `"manual"` (CSV import) |
 | `v_threshold` | `0.25` | m/s — mean below this = relief segment |
 | `min_pts` | `5 × hz` | Minimum rows per segment; tiny segments are merged |

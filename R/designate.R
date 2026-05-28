@@ -1,11 +1,22 @@
 # segment name: designate_logic ---
+
+# Base-R equivalent of .run_id() (introduced in dplyr 1.1.0).
+# Assigns a sequential integer that increments each time x changes value.
+# Using rle() ensures this works on any dplyr version.
+.run_id <- function(x) {
+  r <- rle(as.character(x))
+  rep(seq_along(r$lengths), r$lengths)
+}
+
 #' designate Motion Data
 #' @description Finalises segmentation using statistical masking and type-safe combining.
 #' @param .data Tibble with 'velocity', 'unix_time', and 'is_interpolated'.
 #' @param v_threshold Velocity (m/s) to distinguish active vs downtime.
 #' @param min_pts Minimum segment length in rows. Defaults to 5 seconds
 #'   worth of data based on the sample rate (Hz) in metadata, or 50 rows
-#'   if Hz is unavailable.
+#'   if Hz is unavailable. Set \code{min_pts = 0} to disable segment merging
+#'   entirely — useful when capturing ultra-short explosive efforts (e.g. a
+#'   3-second sprint) that would otherwise be merged into an adjacent segment.
 #' @param method Character; segmentation method. \code{'corbett'} (default) uses
 #'   PELT change-point detection. \code{'manual'} imports user-supplied labels
 #'   from a CSV via \code{file}.
@@ -34,6 +45,19 @@ designate <- function(.data,
     meta <- attr(.data, 'metadata')
     hz <- meta$interpolation_hz %||% meta$hz %||% meta$sample_rate %||% 10L
     min_pts <- as.integer(hz * 5)
+  }
+
+  if (min_pts > 0L && nrow(.data) < min_pts * 2L) {
+    warning(sprintf(
+      paste0(
+        "designate(): input has %d rows but min_pts = %d (%.1f s). ",
+        "The dataset is shorter than 2 × min_pts, so short segments ",
+        "may be merged and brief high-intensity efforts could be absorbed ",
+        "into adjacent periods. Consider setting min_pts to a smaller value ",
+        "or min_pts = 0 to disable merging entirely."
+      ),
+      nrow(.data), min_pts, min_pts / (attr(.data, 'metadata')$interpolation_hz %||% 10)
+    ), call. = FALSE)
   }
 
   # Will be populated for corbett method changepoint details
@@ -91,7 +115,7 @@ designate <- function(.data,
     ) |>
     dplyr::ungroup() |>
     dplyr::mutate(
-      type_group_id = dplyr::consecutive_id(is_downtime)
+      type_group_id = .run_id(is_downtime)
     )
 
   # 4. Combine tiny segments together
@@ -119,11 +143,11 @@ designate <- function(.data,
     dplyr::ungroup() |>
     dplyr::mutate(
       label_prefix = ifelse(is_static_final, 'relief', 'active'),
-      segment_order = dplyr::consecutive_id(refined_id)
+      segment_order = .run_id(refined_id)
     ) |>
     dplyr::group_by(label_prefix) |>
     dplyr::mutate(
-      type_rank = dplyr::consecutive_id(segment_order),
+      type_rank = .run_id(segment_order),
       designation = paste0(label_prefix, '_', type_rank)
     ) |>
     dplyr::ungroup()
@@ -396,7 +420,7 @@ export_designations <- function(.data, path = NULL) {
   }
 
   # Identify contiguous runs so repeated labels aren't collapsed
-  .data$`.run_id` <- dplyr::consecutive_id(.data$designation)
+  .data$`.run_id` <- .run_id(.data$designation)
 
   summary_df <- .data |>
     dplyr::group_by(`.run_id`, designation) |>

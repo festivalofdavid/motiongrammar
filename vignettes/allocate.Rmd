@@ -217,7 +217,7 @@ maintained even when thresholds change between seasons.
 ## 7. Reading the quality log
 
 ```{r quality}
-quality_report(trace)
+quality_report(trace, step = 'allocate')
 ```
 
 The allocate section records each named scheme separately: band count,

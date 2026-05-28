@@ -4,7 +4,13 @@
 \alias{interpolate}
 \title{Repair timeline gaps}
 \usage{
-interpolate(.data, method = "linear", hz = NULL, max_gap_frames = 5)
+interpolate(
+  .data,
+  method = "linear",
+  hz = NULL,
+  max_gap_frames = 5,
+  fill_passthrough = "none"
+)
 }
 \arguments{
 \item{.data}{A motion_trace object.}
@@ -17,6 +23,13 @@ Falls back to 1 Hz with a message if not available. Pass an explicit value to
 override.}
 
 \item{max_gap_frames}{Integer; gaps larger than this (in frames) are left as NA.}
+
+\item{fill_passthrough}{Character; how to handle NAs in non-numeric passthrough
+columns (character/factor fields such as zone labels or event flags) for rows
+inserted by grid expansion. \code{"none"} (default) leaves those rows as NA.
+\code{"constant"} forward-fills each column with its last observed value (LOCF).
+Numeric passthrough columns are always interpolated using \code{method} regardless
+of this setting.}
 }
 \value{
 An interpolated \code{motion_trace} object.

@@ -20,7 +20,24 @@ filt_sma <- function(x, window = 5) {
 #' @keywords internal
 filt_ema <- function(x, alpha = 0.3) {
   if (length(x) < 2) return(rep(NA_real_, length(x)))
-  as.numeric(stats::filter(x * alpha, filter = 1 - alpha, method = 'recursive'))
+
+  first_idx <- which(!is.na(x))[1L]
+  if (is.na(first_idx)) return(x)   # all-NA input — nothing to smooth
+
+  # stats::filter(method = "recursive") initialises y_0 = 0, so any segment
+  # that starts at a non-zero value produces an artificial ramp from 0.
+  # This loop pins y[first_idx] = x[first_idx] and restarts from the
+  # first valid value after each NA gap, avoiding both the zero-bias
+  # warm-up and forward NA propagation across gaps.
+  out <- x
+  for (i in (first_idx + 1L):length(x)) {
+    if (!is.na(out[i])) {
+      prev <- out[i - 1L]
+      out[i] <- if (is.na(prev)) out[i]   # gap just ended: re-initialise
+                 else alpha * out[i] + (1 - alpha) * prev
+    }
+  }
+  as.numeric(out)
 }
 
 # segment name: filt_savgol ---
@@ -193,6 +210,12 @@ filt_psd <- function(x, hz) {
 #' @param window Integer; window size for SMA or Savitzky-Golay filters.
 #' @param alpha Numeric; smoothing factor for EMA (0-1).
 #' @param poly_order Integer; polynomial order for Savitzky-Golay filter.
+#' @param clamp_non_negative Character vector of base column names whose
+#'   filtered output (\code{f_<col>}) must be clamped to \eqn{\geq 0} after
+#'   filtering. Defaults to \code{"velocity"}, which prevents Gibbs-effect
+#'   ringing near sharp decelerations from producing physically impossible
+#'   negative speeds. Pass \code{character(0)} or \code{NULL} to disable.
+#'   Any clamped value count is recorded in the quality log.
 #'
 #' @return A filtered \code{motion_trace} object with \code{f_} prefixed columns.
 #' @export
@@ -204,7 +227,8 @@ filtrate <- function(.data,
                      type = 'low',
                      window = 5,
                      alpha = 0.3,
-                     poly_order = 2){
+                     poly_order = 2,
+                     clamp_non_negative = "velocity"){
 
   validate_motion_trace(.data, 'filtrate')
 
@@ -312,6 +336,22 @@ filtrate <- function(.data,
     call. = FALSE)
   }
 
+  # Physical clamp: high-order / zero-phase filters ring near sharp transitions
+  # (Gibbs effect), producing tiny negative artefacts in physically non-negative
+  # signals such as forward speed. Clamp f_<col> to 0 for each listed column.
+  clamp_counts <- list()
+  if (length(clamp_non_negative) > 0) {
+    for (col in clamp_non_negative) {
+      f_col <- paste0('f_', col)
+      if (f_col %in% names(output)) {
+        neg  <- !is.na(output[[f_col]]) & output[[f_col]] < 0
+        n_cl <- sum(neg)
+        if (n_cl > 0) output[[f_col]][neg] <- 0
+        clamp_counts[[col]] <- n_cl
+      }
+    }
+  }
+
   # Do not create a spurious f_z column when z is absent from the data.
   # Downstream derivate() only uses f_x and f_y, so no zero-fill is needed.
 
@@ -331,7 +371,8 @@ filtrate <- function(.data,
   output <- filt_quality_log(output, method, filter_params, target_cols,
                              rows_before = rows_before,
                              cols_before = cols_before,
-                             input_cols_used = input_cols_used)
+                             input_cols_used = input_cols_used,
+                             clamp_counts = clamp_counts)
 
   return(output)
 }
@@ -383,7 +424,8 @@ filtrate <- function(.data,
 #' @keywords internal
 filt_quality_log <- function(output, method, params, target_cols = c('x', 'y', 'z'),
                              rows_before = NULL, cols_before = NULL,
-                             input_cols_used = NULL) {
+                             input_cols_used = NULL,
+                             clamp_counts = list()) {
 
   qual <- attr(output, 'quality')
   if (is.null(qual)) qual <- list()
@@ -421,6 +463,7 @@ filt_quality_log <- function(output, method, params, target_cols = c('x', 'y', '
     input_column_used = if (!is.null(input_cols_used)) as.list(input_cols_used) else NULL,
     axes_filtered   = axes_filtered,
     na_introduced   = na_counts,
+    physical_clamp  = if (length(clamp_counts) > 0) clamp_counts else NULL,
     rows_before     = if (!is.null(rows_before)) rows_before else nrow(output),
     rows_after      = nrow(output),
     cols_before     = if (!is.null(cols_before)) cols_before else names(output),

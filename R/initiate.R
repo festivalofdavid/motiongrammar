@@ -932,6 +932,153 @@ set_metadata <- function(.data, ...){
   return(.data)
 }
 
+#' Convert an Existing Data Frame to a motion_trace
+#' @description Wraps an in-memory data frame or tibble in the
+#'   \code{motion_trace} class without reading from disk. Use this when
+#'   tracking data arrives via a database query, a simulation, a model
+#'   output, or any other R object that was not loaded through
+#'   \code{initiate()}.
+#' @param .data A data frame or tibble. Must not already be a
+#'   \code{motion_trace}.
+#' @param coord_system Character; \code{"gps"} (expects \code{lat}/\code{lng}
+#'   columns) or \code{"local"} (expects \code{x}/\code{y} columns).
+#' @param col_time Name of the unix timestamp column. \code{NULL} (default)
+#'   auto-detects from common names: \code{unix_time}, \code{time},
+#'   \code{timestamp}, \code{t}, \code{unix}, \code{epoch}.
+#' @param col_lat,col_lng GPS coordinate column names. \code{NULL}
+#'   auto-detects from \code{lat}/\code{latitude} and
+#'   \code{lng}/\code{lon}/\code{longitude}. Ignored when
+#'   \code{coord_system = "local"}.
+#' @param col_x,col_y,col_z Local coordinate column names. \code{NULL}
+#'   auto-detects columns named \code{x}, \code{y}, \code{z}.
+#'   \code{col_z} is optional. Ignored when \code{coord_system = "gps"}.
+#' @param name A string stored as the session name in metadata. Defaults to
+#'   \code{"as_motion_trace"}.
+#' @param ... Additional metadata fields forwarded to
+#'   \code{\link{set_metadata}} (e.g. \code{player_name = "Alice"},
+#'   \code{sport = "Football"}).
+#' @return A \code{motion_trace} object with \code{metadata} and
+#'   \code{quality} attributes populated, ready for any downstream
+#'   pipeline step.
+#' @export
+as_motion_trace <- function(
+  .data,
+  coord_system = c('gps', 'local'),
+  col_time     = NULL,
+  col_lat      = NULL,
+  col_lng      = NULL,
+  col_x        = NULL,
+  col_y        = NULL,
+  col_z        = NULL,
+  name         = 'as_motion_trace',
+  ...
+) {
+  if (!is.data.frame(.data)) {
+    stop("as_motion_trace(): .data must be a data frame or tibble.")
+  }
+  if (inherits(.data, 'motion_trace')) {
+    stop(
+      "as_motion_trace(): .data is already a motion_trace. ",
+      "Use set_metadata() to update its fields."
+    )
+  }
+
+  coord_system <- match.arg(coord_system)
+  out <- tibble::as_tibble(.data)
+
+  # ── Helper: resolve a column name from an explicit value or a priority list ──
+  .resolve_col <- function(explicit, candidates, role, required = TRUE) {
+    nms_lower <- tolower(names(out))
+    if (!is.null(explicit)) {
+      if (!explicit %in% names(out))
+        stop("as_motion_trace(): col for '", role, "' ('", explicit,
+             "') not found in .data.")
+      return(explicit)
+    }
+    for (cand in candidates) {
+      hit <- which(nms_lower == cand)
+      if (length(hit) > 0) return(names(out)[hit[1]])
+    }
+    if (required)
+      stop(
+        "as_motion_trace(): could not detect a '", role, "' column. ",
+        "Expected one of: ", paste(candidates, collapse = ', '),
+        ". Provide col_", role, " = 'your_column_name'."
+      )
+    NULL
+  }
+
+  # ── Resolve unix_time ───────────────────────────────────────────────────────
+  time_candidates <- c('unix_time', 'time', 'timestamp', 't', 'unix', 'epoch')
+  time_col <- .resolve_col(col_time, time_candidates, 'time')
+
+  if (time_col != 'unix_time') {
+    nms_lower <- tolower(names(out))
+    multi <- intersect(time_candidates[-1], nms_lower[nms_lower != tolower(time_col)])
+    if (length(multi) > 0 && is.null(col_time))
+      warning(
+        "as_motion_trace(): multiple time-like columns found (",
+        paste(names(out)[tolower(names(out)) %in% time_candidates], collapse = ', '),
+        "). Using '", time_col, "'. Pass col_time to be explicit.",
+        call. = FALSE
+      )
+    names(out)[names(out) == time_col] <- 'unix_time'
+  }
+
+  if (!is.numeric(out$unix_time)) {
+    converted <- suppressWarnings(as.numeric(out$unix_time))
+    if (all(is.na(converted)))
+      stop(
+        "as_motion_trace(): 'unix_time' could not be coerced to numeric. ",
+        "Provide a column of Unix epoch seconds."
+      )
+    out$unix_time <- converted
+  }
+
+  # ── Resolve coordinate columns ───────────────────────────────────────────────
+  if (coord_system == 'gps') {
+    lat_col <- .resolve_col(col_lat, c('lat', 'latitude'),              'lat')
+    lng_col <- .resolve_col(col_lng, c('lng', 'lon', 'longitude'),      'lng')
+    if (lat_col != 'lat') names(out)[names(out) == lat_col] <- 'lat'
+    if (lng_col != 'lng') names(out)[names(out) == lng_col] <- 'lng'
+  } else {
+    x_col <- .resolve_col(col_x, 'x', 'x')
+    y_col <- .resolve_col(col_y, 'y', 'y')
+    z_col <- .resolve_col(col_z, 'z', 'z', required = FALSE)
+    if (x_col != 'x') names(out)[names(out) == x_col] <- 'x'
+    if (y_col != 'y') names(out)[names(out) == y_col] <- 'y'
+    if (!is.null(z_col) && z_col != 'z') names(out)[names(out) == z_col] <- 'z'
+  }
+
+  # ── Ensure is_interpolated exists ──────────────────────────────────────────
+  if (!'is_interpolated' %in% names(out)) out$is_interpolated <- FALSE
+
+  # ── Metadata and quality log ────────────────────────────────────────────────
+  metadata <- create_metadata(
+    session      = name,
+    source       = 'as_motion_trace',
+    trace        = out,
+    device_info  = NULL,
+    coord_system = coord_system
+  )
+
+  qual <- init_quality_log(out, 'as_motion_trace')
+
+  out <- structure(
+    out,
+    class    = c('motion_trace', 'tbl_df', 'tbl', 'data.frame'),
+    metadata = metadata,
+    quality  = qual
+  )
+
+  extra_meta <- list(...)
+  if (length(extra_meta) > 0) {
+    out <- do.call(set_metadata, c(list(out), extra_meta))
+  }
+
+  out
+}
+
 #' Normalise Unix Timestamps
 #' @keywords internal
 norm_unix <- function(unix_vec){

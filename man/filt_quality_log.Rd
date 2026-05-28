@@ -11,7 +11,8 @@ filt_quality_log(
   target_cols = c("x", "y", "z"),
   rows_before = NULL,
   cols_before = NULL,
-  input_cols_used = NULL
+  input_cols_used = NULL,
+  clamp_counts = list()
 )
 }
 \arguments{

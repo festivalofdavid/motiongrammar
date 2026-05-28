@@ -41,21 +41,29 @@ trace_pre <- initiate(
 
 `elaborate()` is the *motiongrammar* safe version of `dplyr::mutate()`.
 It adds or modifies columns while preserving the `motion_trace` class
-and all attached attributes (`metadata`, `quality`).
+and all attached attributes (`metadata`, `quality`). To me, this is the
+biggest boon of *motiongrammar*, because it's where your creativity can
+run free and where you can implement second by second analysis with
+ease. For example, you can use elaborate to calculate peak demands (a la
+Delaney et al)., or to create your own case_when logic, or even to try
+calculating something that you've read about but is not yet supported by
+your provider.
 
 ------------------------------------------------------------------------
 
-## 1. The problem it solves
+## 1. Why use this over a mutate?
 
 `motion_trace` objects carry quality and meta attributes for
 reproducibility. Standard `dplyr::mutate()` silently drops them:
 
 ```{r problem, eval=FALSE}
 # This loses metadata and quality:
-trace <- trace |> dplyr::mutate(curved_load = velocity * abs(angular_velocity))
+trace <- trace |> 
+  dplyr::mutate(curved_load = velocity * abs(angular_velocity))
 
 # This preserves them:
-trace <- trace |> elaborate(curved_load = velocity * abs(angular_velocity))
+trace <- trace |> 
+  elaborate(curved_load = velocity * abs(angular_velocity))
 ```
 
 Use `elaborate()` any time you want to add a column to a `motion_trace`.
@@ -68,7 +76,11 @@ Below, I made up an example of "curved load". This is not a real,
 validated metric. It just exists to show how you might use your
 imagination to create new series of data. If you wanted to have summary
 metrics, you'd use quantitate. Elaborate exists to add something to
-every data point (ie., create a new time-series)
+every data point (ie., create a new time-series).
+
+In the example below, we create a new metric called curve load, we add a
+new column that expresses velocity as km/hr and add some logic for an
+arbitrary hsr (high speed running) cut off.
 
 ```{r basic}
 library(motiongrammar)
@@ -113,6 +125,9 @@ trace <- trace_pre |>
 
 ### Curved load on the field trajectory
 
+Here's an example of how we could visualise our new time-series. It
+actually looks relatively good, by chance.
+
 ```{r curved-load-field-basic, fig.height=5}
 trace <- trace_pre |>
   elaborate(curved_load = velocity * abs(angular_velocity))
@@ -134,6 +149,9 @@ trace |>
 
 ### Curved load time-series
 
+If we wanted to plot curved load as a time-series, we could do the
+following
+
 ```{r curved-load-ts}
 trace |>
   filter(!is.na(f_x)) |>
@@ -153,9 +171,15 @@ trace |>
 ## 4. Grouped calculations with `by`
 
 The `by` argument groups the data before mutating and ungroups it after.
-This is the mechanism for **within-designation** calculations.
+This is the mechanism for **within-designation** calculations. If you're
+coming from a dplyr background, this is like group_by, but is an
+argument in elaborate itself.
 
 ### Within-designation normalisation
+
+In our example below, we calculate within the designation. So the max
+velocity it finds is within each designation, and not across the entire
+session.
 
 ```{r by-designation}
 trace <- trace_pre |>
@@ -167,6 +191,8 @@ trace <- trace_pre |>
 ```
 
 ### Time since designation
+
+Or if we want to see how long it's been since the designation began....
 
 ```{r by-time}
 trace <- trace_pre |>
@@ -180,8 +206,8 @@ trace <- trace_pre |>
 
 ## 5. Logging expressions — `log_expr`
 
-Set `log_expr = TRUE` to store the formula text in the quality log —
-useful for methods sections of publications where you want the full
+Set `log_expr = TRUE` to store the formula text in the quality log. This
+is useful for methods sections of publications where you want the full
 computational chain embedded in the data object:
 
 ```{r log-expr}
@@ -199,7 +225,7 @@ attr(trace, "quality")$elaborate[[1]]$expressions
 
 ## 6. Case study — Varley Peak Demands
 
-Proposed by Varley and later adapted by Delaney, "peak demand" in
+Proposed by Varley and later popularised by Delaney, "peak demand" in
 team-sports is sometimes calculated by computing a simple moving average
 over an acceleration time-series (and then later summarising it in
 quantitate.) I've included an example of how you can use elaborate to
@@ -231,7 +257,30 @@ columns modified, the `by` grouping used, and expression text if
 ## Quick reference
 
 | Argument   | Default | Purpose                                               |
-|------------|---------|-------------------------------------------------------|
+|-------------|-------------|----------------------------------------------|
 | `...`      | —       | Column expressions — same syntax as `dplyr::mutate()` |
 | `by`       | `NULL`  | Group by these columns before mutating, ungroup after |
 | `log_expr` | `FALSE` | Store expression text in the quality log              |
+
+------------------------------------------------------------------------
+
+> **Developer note — preserving the motion_trace structure**
+>
+> A `motion_trace` is a specialised wrapper class: a tibble with
+> `metadata` and `quality` attributes attached. Base R operators that
+> build a new data frame from the ground up — `subset()`, `cbind()`,
+> `rbind()`, and bracket sub-setting (`df[, 1:3]`) — discard custom
+> attributes, silently producing a plain tibble with the class
+> declaration and quality log both gone. Calling `dplyr::mutate()`
+> directly has the same effect, which is exactly why `elaborate()` exists.
+>
+> **Always use `elaborate()`** for data transformations and variable
+> creation. It calls `dplyr::mutate()` internally but then restores the
+> class and all attributes before returning.
+>
+> **Row-filtering, sorting, and column-selecting** via the standard dplyr
+> verbs (`filter()`, `select()`, `arrange()`, `slice()`) are safe:
+> *motiongrammar* registers a `vctrs::vec_restore` method that
+> reattaches `metadata` and `quality` automatically. If you suspect the
+> class has been stripped at any point, check with
+> `inherits(trace, "motion_trace")`.

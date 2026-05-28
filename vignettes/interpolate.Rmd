@@ -104,6 +104,33 @@ trace |>
 In a well-functioning GPS session most points should be blue. Clusters
 of red indicate where the signal dropped and linear fill was used.
 
+A spatial plot shows *where* gaps occurred. A time-series plot shows
+*when* they occurred and how the filled values connect to the
+surrounding real data:
+
+```{r plot-interpolated-time}
+trace |>
+  filter(!is.na(x)) |>
+  ggplot(aes(x = unix_time, y = x)) +
+  geom_line(colour = "#2B7C85", linewidth = 0.4) +
+  geom_point(
+    data  = \(d) filter(d, is_interpolated),
+    colour = "#FF6F59", size = 1.2
+  ) +
+  labs(
+    title    = "Visualising repaired data gaps",
+    subtitle = "Orange points = interpolated; line = full reconstructed trajectory",
+    x = "Time (Unix seconds)", y = "x (m)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+Each orange point is a position the package estimated rather than
+recorded. A short isolated cluster means a brief signal hiccup — fine
+to keep. A long run of orange covering a sharp directional change is
+worth scrutinising before running kinematics.
+
 ------------------------------------------------------------------------
 
 ## 4. The `max_gap_frames` threshold
@@ -170,7 +197,8 @@ lapply(list(linear = trace, spline = trace_spline, constant = trace_constant), f
 ## 6. Reading the quality log
 
 ```{r quality}
-quality_report(trace)
+quality_report(trace,
+               step = 'interpolate')
 ```
 
 The interpolate section shows the gap structure before filling (count,
@@ -183,7 +211,18 @@ ratio (\> 20–30%) is flagged as an issue.
 ## Quick reference
 
 | Argument | Default | Purpose |
-|------------------------|------------------------|------------------------|
+|----|----|----|
 | `method` | `"linear"` | `"linear"`, `"spline"`, or `"constant"` |
 | `hz` | from metadata | Target frame rate |
-| `max_gap_frames` | `5` | Gaps larger than this (frames) are left as NA |
+| `max_gap_frames` | `5` | Gaps larger than this (frames) are left as `NA` |
+| `fill_passthrough` | `"none"` | `"constant"` forward-fills non-numeric columns (e.g. zone labels) through inserted rows |
+
+**Remaining NAs after interpolation are intentional.** If you still see
+`NA` in `x` or `y` after calling `interpolate()`, it means those gaps
+were wider than `max_gap_frames` and were deliberately left unfilled.
+This is the safety threshold working as designed — the function is
+protecting you from fabricating positions across gaps so large that any
+estimated path would be meaningless. To fill more gaps, increase
+`max_gap_frames`; to understand which gaps were skipped, check
+`quality_report(trace, step = "interpolate")` and look at
+`gaps$gaps_exceeding_maxgap`.

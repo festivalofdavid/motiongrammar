@@ -13,7 +13,8 @@ filtrate(
   type = "low",
   window = 5,
   alpha = 0.3,
-  poly_order = 2
+  poly_order = 2,
+  clamp_non_negative = "velocity"
 )
 }
 \arguments{
@@ -39,6 +40,13 @@ half the sampling rate (Nyquist frequency).}
 \item{alpha}{Numeric; smoothing factor for EMA (0-1).}
 
 \item{poly_order}{Integer; polynomial order for Savitzky-Golay filter.}
+
+\item{clamp_non_negative}{Character vector of base column names whose
+filtered output (\code{f_<col>}) must be clamped to \eqn{\geq 0} after
+filtering. Defaults to \code{"velocity"}, which prevents Gibbs-effect
+ringing near sharp decelerations from producing physically impossible
+negative speeds. Pass \code{character(0)} or \code{NULL} to disable.
+Any clamped value count is recorded in the quality log.}
 }
 \value{
 A filtered \code{motion_trace} object with \code{f_} prefixed columns.

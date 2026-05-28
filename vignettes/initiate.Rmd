@@ -38,7 +38,7 @@ Every call to `initiate()` returns the same structure regardless of
 source:
 
 | Component | What it contains |
-|---------------|--------------------------------------------------------|
+|----|----|
 | **Data** | A tibble with `unix_time` plus coordinate columns (`lat`/`lng`/`altitude` for GPS, or `x`/`y`/`z` for local). Extra columns (velocity, heart rate, etc.) appear after the core columns. |
 | **Metadata** | A named list include sample rate (Hz), duration, device info, player/session identifiers. Access with `metadata_report()`. We save memory by not requiring dedicated columns for static metadata. |
 | **Quality** | An audit log seeded at ingestion and appended by every subsequent pipeline step. Access with `quality_report()`. |
@@ -122,7 +122,7 @@ case-insensitive.
 Useful additional arguments:
 
 | Argument | Default | Purpose |
-|----------------|---------------|-----------------------------------------|
+|----|----|----|
 | `skip` | `0` | Header rows to skip before column names row (eg. catapult used to have some meta in their csv) |
 | `max_empty_lines` | `3` | Empty rows that signal end-of-data |
 | `comment` | `"#"` | Lines starting with this character are ignored |
@@ -468,17 +468,112 @@ names(traces) <- tools::file_path_sans_ext(basename(files))
 
 ------------------------------------------------------------------------
 
+## 8. Converting an in-memory data frame
+
+Sometimes your tracking data is already in R — pulled from a database,
+returned by an API wrapper, produced by a simulation, or loaded with
+your own `read_csv()` call. In these cases you don't want to write the
+data out to a file just to read it back through `initiate()`. Use
+`as_motion_trace()` instead.
+
+### 8.1 GPS data (lat / lng)
+
+```{r as-motion-trace-gps}
+# Imagine this came from a database query or a bespoke parser
+raw_df <- data.frame(
+  timestamp = seq(1700000000, by = 0.1, length.out = 1000),
+  latitude  = 51.5 + cumsum(rnorm(1000, 0, 0.00005)),
+  longitude = -0.1 + cumsum(rnorm(1000, 0, 0.00005)),
+  altitude  = 12
+)
+
+trace <- as_motion_trace(
+  raw_df,
+  coord_system = "gps",
+  col_time = "timestamp",
+  col_lat  = "latitude",
+  col_lng  = "longitude",
+  # Extra metadata passed straight through
+  player_name = "Jade Haycraft",
+  sport       = "Football",
+  session_type = "Match"
+)
+
+trace
+```
+
+The result is a fully formed `motion_trace` with `metadata` and
+`quality` populated. From here you continue with the normal pipeline —
+`coordinate()`, `interpolate()`, `derivate()`, etc.
+
+### 8.2 Local (x / y) coordinate data
+
+Optical and UWB tracking systems often export positions in metres
+relative to a fixed origin (e.g. the centre spot) rather than in
+latitude and longitude. Pass `coord_system = "local"`:
+
+```{r as-motion-trace-local}
+raw_local <- data.frame(
+  t   = seq(0, 99.9, by = 0.1),
+  pos_x = cumsum(rnorm(1000, 0.05, 0.2)),
+  pos_y = cumsum(rnorm(1000, 0.01, 0.2))
+)
+
+trace <- as_motion_trace(
+  raw_local,
+  coord_system = "local",
+  col_time = "t",
+  col_x    = "pos_x",
+  col_y    = "pos_y",
+  player_name = "Alex Burnett",
+  sport       = "Basketball"
+)
+```
+
+Because the data is already in Cartesian metres, you can skip
+`coordinate()` and proceed directly to `interpolate()` → `derivate()`.
+
+### 8.3 Column auto-detection
+
+If your column names already match common conventions you can omit the
+`col_*` arguments entirely:
+
+```{r as-motion-trace-autodetect}
+# Columns named 'time', 'lat', 'lng' → detected without hints
+trace <- as_motion_trace(df, coord_system = "gps")
+
+# Columns named 'x', 'y' → detected without hints
+trace <- as_motion_trace(df, coord_system = "local")
+```
+
+`as_motion_trace()` tries these names in priority order:
+
+| Role | Searched names (in order)                              |
+|------|--------------------------------------------------------|
+| Time | `unix_time`, `time`, `timestamp`, `t`, `unix`, `epoch` |
+| Lat  | `lat`, `latitude`                                      |
+| Lng  | `lng`, `lon`, `longitude`                              |
+| X    | `x`                                                    |
+| Y    | `y`                                                    |
+| Z    | `z` (optional)                                         |
+
+If a required column cannot be detected, the function stops with a clear
+error message that tells you which `col_*` argument to supply.
+
+------------------------------------------------------------------------
+
 ## Quick reference
 
-| Source | `source =` | When to use |
-|-------------------|------------------|-----------------------------------|
-| CSV (auto-detect columns) | `"guess_csv"` / `"auto"` | Exploration and first look at a new file |
-| CSV (explicit columns) | `"manual_csv"` | Stable column names, no saved template yet |
-| CSV (locked schema) | `"template_csv"` | Production, reproducible, team pipelines |
-| Catapult replay export | `"catapult_replay"` | Catapult-specific preamble format |
-| GPX track file | `"gpx"` / `"auto"` | Consumer GPS devices, Garmin, Apple Watch |
-| Strava API | `"strava"` | Activity data from the Strava platform |
-| Any JSON REST API | `"generic"` | Custom tracking platform or in-house system |
+| Source | Function / `source =` | When to use |
+|----|----|----|
+| CSV (auto-detect columns) | `initiate()` `"guess_csv"` / `"auto"` | Exploration and first look at a new file |
+| CSV (explicit columns) | `initiate()` `"manual_csv"` | Stable column names, no saved template yet |
+| CSV (locked schema) | `initiate()` `"template_csv"` | Production, reproducible, team pipelines |
+| Catapult replay export | `initiate()` `"catapult_replay"` | Catapult-specific preamble format |
+| GPX track file | `initiate()` `"gpx"` / `"auto"` | Consumer GPS devices, Garmin, Apple Watch |
+| Strava API | `initiate()` `"strava"` | Activity data from the Strava platform |
+| Any JSON REST API | `initiate()` `"generic"` | Custom tracking platform or in-house system |
+| In-memory data frame | `as_motion_trace()` | Data already in R (database query, simulation, bespoke parser) |
 
 The recommended template workflow for any repeated analysis:
 
@@ -492,3 +587,23 @@ This ensures that column parsing is deterministic, documented, and
 independent of heuristics — exactly what you need when the analysis will
 be reported, peer-reviewed, or run across many sessions.
 
+------------------------------------------------------------------------
+
+> **Developer note — keeping attributes intact**
+>
+> A `motion_trace` is a standard tibble with two extra attributes
+> attached: `metadata` and `quality`. Base R operators that construct a
+> new data frame from scratch — `subset()`, `cbind()`, `rbind()`, and
+> bracket sub-setting (`df[, 1:3]`) — strip custom attributes, silently
+> returning a plain tibble with no quality log and no class declaration.
+> Calling `dplyr::mutate()` directly has the same effect.
+>
+> **To add or modify columns** and keep the attributes intact, always use
+> `elaborate()`.
+>
+> **For row-filtering, column-selecting, sorting, and slicing**, the
+> standard dplyr verbs (`filter()`, `select()`, `arrange()`, `slice()`)
+> are safe — *motiongrammar* registers a `vctrs::vec_restore` method that
+> reattaches `metadata` and `quality` automatically after any dplyr
+> operation. If you ever suspect the class has been dropped, check with
+> `inherits(trace, "motion_trace")`.

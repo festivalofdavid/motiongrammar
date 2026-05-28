@@ -24,7 +24,8 @@ interp_quality_log(
   passthrough_na_counts_after = integer(0),
   cols_before = NULL,
   numeric_passthrough = character(0),
-  non_numeric_passthrough = character(0)
+  non_numeric_passthrough = character(0),
+  fill_passthrough = "none"
 )
 }
 \arguments{

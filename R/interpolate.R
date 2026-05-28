@@ -41,7 +41,8 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
                                 passthrough_na_counts_after = integer(0),
                                 cols_before = NULL,
                                 numeric_passthrough = character(0),
-                                non_numeric_passthrough = character(0)) {
+                                non_numeric_passthrough = character(0),
+                                fill_passthrough = "none") {
 
   qual <- attr(output, 'quality')
   if (is.null(qual)) qual <- list()
@@ -169,14 +170,16 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
     filled = list(x = n_filled_x, y = n_filled_y, z = n_filled_z),
     remaining_na = list(x = n_remaining_na_x, y = n_remaining_na_y),
 
-    # Passthrough columns — numeric ones are interpolated; non-numeric are left as-is
+    # Passthrough columns — numeric ones are interpolated; non-numeric behaviour
+    # depends on fill_passthrough ("none" keeps NAs; "constant" forward-fills).
     passthrough_columns = if (length(passthrough_na_counts) > 0) {
       list(
         note = paste0(
           "x/y/z and numeric passthrough columns are interpolated. ",
-          "Non-numeric columns (character, factor) are carried through as-is: ",
-          n_time_gaps, " row(s) inserted to fill time gaps receive NA for non-numeric columns."
+          "Non-numeric columns (character, factor): fill_passthrough = '", fill_passthrough, "'. ",
+          n_time_gaps, " row(s) inserted to fill time gaps."
         ),
+        fill_passthrough    = fill_passthrough,
         interpolated        = numeric_passthrough,
         skipped_non_numeric = non_numeric_passthrough,
         na_counts_from_gaps = as.list(passthrough_na_counts),
@@ -185,6 +188,7 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
     } else {
       list(
         note                = "No passthrough columns present.",
+        fill_passthrough    = fill_passthrough,
         interpolated        = character(0),
         skipped_non_numeric = character(0),
         na_counts_from_gaps = list(),
@@ -228,13 +232,20 @@ interp_quality_log <- function(output, method, hz, max_gap_frames,
 #'   Falls back to 1 Hz with a message if not available. Pass an explicit value to
 #'   override.
 #' @param max_gap_frames Integer; gaps larger than this (in frames) are left as NA.
+#' @param fill_passthrough Character; how to handle NAs in non-numeric passthrough
+#'   columns (character/factor fields such as zone labels or event flags) for rows
+#'   inserted by grid expansion. \code{"none"} (default) leaves those rows as NA.
+#'   \code{"constant"} forward-fills each column with its last observed value (LOCF).
+#'   Numeric passthrough columns are always interpolated using \code{method} regardless
+#'   of this setting.
 #'
 #' @return An interpolated \code{motion_trace} object.
 #' @export
 interpolate <- function(.data,
                         method = 'linear',
                         hz = NULL,
-                        max_gap_frames = 5){
+                        max_gap_frames = 5,
+                        fill_passthrough = "none"){
 
   validate_motion_trace(.data, 'interpolate')
 
@@ -342,31 +353,69 @@ interpolate <- function(.data,
   na_y_before <- sum(is.na(output$y))
   na_z_before <- if (has_z) sum(is.na(output$z)) else 0L
 
-  # apply interpolation with one of the zoo methods
-  # linear is safest; spline can fabricate wild values in gaps
+  # Minimum non-NA points required before zoo will produce valid output.
+  # zoo::na.spline needs >=4; zoo::na.approx needs >=2; zoo::na.locf needs >=1.
+  min_valid_pts <- switch(method, spline = 4L, linear = 2L, constant = 1L)
+
+  # Guard: skip interpolation and warn when a column lacks enough valid points.
+  # Prevents zoo::na.spline / zoo::na.approx from hard-crashing on all-NA columns
+  # (e.g. after drop_outliers = TRUE on a badly corrupted track).
+  .safe_zoo <- function(vec, zoo_fn, col_name) {
+    n_valid <- sum(!is.na(vec))
+    if (n_valid < min_valid_pts) {
+      warning(sprintf(
+        "interpolate(): column '%s' has %d non-NA value(s); '%s' requires at least %d. Returning column unchanged.",
+        col_name, n_valid, method, min_valid_pts
+      ), call. = FALSE)
+      return(vec)
+    }
+    zoo_fn(vec)
+  }
+
+  # Apply interpolation with one of the zoo methods.
+  # linear is safest; spline can fabricate wild values in gaps.
   output <- switch(method,
-    'spline'   = output |> dplyr::mutate(x = zoo::na.spline(x, na.rm = FALSE, maxgap = max_gap_frames),
-                                         y = zoo::na.spline(y, na.rm = FALSE, maxgap = max_gap_frames),
-                                         z = if(has_z) zoo::na.spline(z, na.rm = FALSE, maxgap = max_gap_frames) else z),
-    'linear'   = output |> dplyr::mutate(x = zoo::na.approx(x, na.rm = FALSE, maxgap = max_gap_frames),
-                                         y = zoo::na.approx(y, na.rm = FALSE, maxgap = max_gap_frames),
-                                         z = if(has_z) zoo::na.approx(z, na.rm = FALSE, maxgap = max_gap_frames) else z),
-    'constant' = output |> dplyr::mutate(x = zoo::na.locf(x, na.rm = FALSE, maxgap = max_gap_frames),
-                                         y = zoo::na.locf(y, na.rm = FALSE, maxgap = max_gap_frames),
-                                         z = if(has_z) zoo::na.locf(z, na.rm = FALSE, maxgap = max_gap_frames) else z),
+    'spline' = output |> dplyr::mutate(
+      x = .safe_zoo(x, \(v) zoo::na.spline(v, na.rm = FALSE, maxgap = max_gap_frames), 'x'),
+      y = .safe_zoo(y, \(v) zoo::na.spline(v, na.rm = FALSE, maxgap = max_gap_frames), 'y'),
+      z = if (has_z) .safe_zoo(z, \(v) zoo::na.spline(v, na.rm = FALSE, maxgap = max_gap_frames), 'z') else z
+    ),
+    'linear' = output |> dplyr::mutate(
+      x = .safe_zoo(x, \(v) zoo::na.approx(v, na.rm = FALSE, maxgap = max_gap_frames), 'x'),
+      y = .safe_zoo(y, \(v) zoo::na.approx(v, na.rm = FALSE, maxgap = max_gap_frames), 'y'),
+      z = if (has_z) .safe_zoo(z, \(v) zoo::na.approx(v, na.rm = FALSE, maxgap = max_gap_frames), 'z') else z
+    ),
+    'constant' = output |> dplyr::mutate(
+      x = .safe_zoo(x, \(v) zoo::na.locf(v, na.rm = FALSE, maxgap = max_gap_frames), 'x'),
+      y = .safe_zoo(y, \(v) zoo::na.locf(v, na.rm = FALSE, maxgap = max_gap_frames), 'y'),
+      z = if (has_z) .safe_zoo(z, \(v) zoo::na.locf(v, na.rm = FALSE, maxgap = max_gap_frames), 'z') else z
+    ),
     stop("Invalid method. Choose 'spline', 'linear', or 'constant'.")
   )
 
   # Interpolate numeric passthrough columns (e.g. HeartRate, Cadence) using the same method.
-  # Non-numeric columns (character, factor) are intentionally skipped.
+  # Non-numeric columns (character, factor) are handled separately below via fill_passthrough.
   if (length(numeric_passthrough) > 0) {
     zoo_fn <- switch(method,
-      'linear'   = \(col) zoo::na.approx(col, na.rm = FALSE, maxgap = max_gap_frames),
-      'spline'   = \(col) zoo::na.spline(col, na.rm = FALSE, maxgap = max_gap_frames),
-      'constant' = \(col) zoo::na.locf(col, na.rm = FALSE, maxgap = max_gap_frames)
+      'linear'   = \(v) zoo::na.approx(v, na.rm = FALSE, maxgap = max_gap_frames),
+      'spline'   = \(v) zoo::na.spline(v, na.rm = FALSE, maxgap = max_gap_frames),
+      'constant' = \(v) zoo::na.locf(v, na.rm = FALSE, maxgap = max_gap_frames)
     )
     output <- output |>
-      dplyr::mutate(dplyr::across(dplyr::all_of(numeric_passthrough), zoo_fn))
+      dplyr::mutate(dplyr::across(
+        dplyr::all_of(numeric_passthrough),
+        \(col) .safe_zoo(col, zoo_fn, dplyr::cur_column())
+      ))
+  }
+
+  # Forward-fill non-numeric passthrough columns when fill_passthrough = "constant".
+  # Default ("none") leaves NAs for inserted time-gap rows as-is.
+  if (fill_passthrough == "constant" && length(non_numeric_passthrough) > 0) {
+    output <- output |>
+      dplyr::mutate(dplyr::across(
+        dplyr::all_of(non_numeric_passthrough),
+        \(col) zoo::na.locf(col, na.rm = FALSE)
+      ))
   }
 
   # Count NAs remaining after all interpolation (coordinates + numeric passthrough)
@@ -411,7 +460,8 @@ interpolate <- function(.data,
     passthrough_na_counts_after = passthrough_na_counts_after,
     cols_before                 = cols_before,
     numeric_passthrough         = numeric_passthrough,
-    non_numeric_passthrough     = non_numeric_passthrough
+    non_numeric_passthrough     = non_numeric_passthrough,
+    fill_passthrough            = fill_passthrough
   )
 
   return(output)

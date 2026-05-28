@@ -20,7 +20,9 @@ designate(
 
 \item{min_pts}{Minimum segment length in rows. Defaults to 5 seconds
 worth of data based on the sample rate (Hz) in metadata, or 50 rows
-if Hz is unavailable.}
+if Hz is unavailable. Set \code{min_pts = 0} to disable segment merging
+entirely — useful when capturing ultra-short explosive efforts (e.g. a
+3-second sprint) that would otherwise be merged into an adjacent segment.}
 
 \item{method}{Character; segmentation method. \code{'corbett'} (default) uses
 PELT change-point detection. \code{'manual'} imports user-supplied labels

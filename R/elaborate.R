@@ -1,5 +1,30 @@
 # segment name: elaborate_logic ---
 
+# Walk an rlang expression AST and return a character vector of any
+# max()/min() calls that receive >=2 column-name symbols as arguments.
+# These are almost always mistaken non-vectorised reductions; the user
+# likely wants pmax()/pmin() for element-wise row operations.
+.find_multi_col_reductions <- function(expr, cols) {
+  reduction_fns <- c('max', 'min')
+  found <- character(0)
+  if (!rlang::is_call(expr)) return(found)
+
+  fn_name <- tryCatch(as.character(rlang::call_name(expr)), error = function(e) '')
+  if (fn_name %in% reduction_fns) {
+    args      <- rlang::call_args(expr)
+    col_args  <- Filter(function(a) rlang::is_symbol(a) && as.character(a) %in% cols, args)
+    if (length(col_args) >= 2L) {
+      col_nms <- vapply(col_args, as.character, character(1))
+      found   <- c(found, sprintf('%s(%s)', fn_name, paste(col_nms, collapse = ', ')))
+    }
+  }
+
+  for (arg in rlang::call_args(expr)) {
+    found <- c(found, .find_multi_col_reductions(arg, cols))
+  }
+  found
+}
+
 #' Elaborate a Motion Trace
 #' @description The \code{motion_trace} equivalent of \code{dplyr::mutate()}.
 #'   Adds or modifies columns while preserving the \code{motion_trace} class
@@ -29,6 +54,23 @@ elaborate <- function(.data, ..., by = NULL, log_expr = FALSE) {
   # Capture expressions before evaluation (needed for both expression logging
   # and for passing to dplyr::mutate() via !!! below)
   quos <- rlang::enquos(...)
+
+  # Detect accidental non-vectorised reductions: max(x, y) in mutate() returns
+  # one scalar for the whole column, not an element-wise result. Users almost
+  # always want pmax(x, y) here. Fire the warning before evaluation so the
+  # user can fix it before bad data reaches the quality log.
+  reduction_hits <- unlist(lapply(quos, function(q) {
+    .find_multi_col_reductions(rlang::get_expr(q), cols_before)
+  }), use.names = FALSE)
+  if (length(reduction_hits) > 0L) {
+    warning(
+      "elaborate(): possible non-vectorised reduction detected. ",
+      "In dplyr::mutate(), max(a, b) computes one scalar across the whole column, not row-wise. ",
+      "Use pmax(a, b) / pmin(a, b) for element-wise operations. ",
+      "Detected: ", paste(unique(reduction_hits), collapse = '; '),
+      call. = FALSE
+    )
+  }
 
   # Stash attributes — dplyr::mutate drops custom ones
   meta <- attr(.data, 'metadata')
@@ -82,8 +124,9 @@ elaborate <- function(.data, ..., by = NULL, log_expr = FALSE) {
     )
   }
 
-  # Restore class
-  class(out) <- c('motion_trace', setdiff(class(out), 'motion_trace'))
+  # Restore class — unique() preserves the existing S3 layout (e.g. grouped_df)
+  # rather than destructively rebuilding the class vector from scratch.
+  class(out) <- unique(c('motion_trace', class(out)))
 
   # Quality log — each call to elaborate() appends one entry to qual$elaborate,
   # consistent with the flat-list pattern used by all other pipeline steps.

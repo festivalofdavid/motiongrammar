@@ -52,6 +52,9 @@ You define what to compute — distance, time, peak velocity — and it
 groups and summarises accordingly. This is motiongrammar's take on summarise, but has the advantage of
 preserving the quality and meta objects.
 
+This differs from elaborate, because we get a single value to summarise a drill or session (depending on your scope). 
+Elaborate returns everything second by second.
+
 ------------------------------------------------------------------------
 
 ## 1. The three scopes
@@ -196,12 +199,7 @@ segment_totals
 ## 4. Reading the quality log
 
 ```{r quality}
-qual <- attr(summary_by_segment, "quality")
-names(qual)   # every step that ran
-qual$quantitate[[1]]$scope
-qual$quantitate[[1]]$group_vars
-qual$quantitate[[1]]$n_rows_in
-qual$quantitate[[1]]$n_rows_out
+
 ```
 
 The quality log attached to the summary tibble contains the complete
