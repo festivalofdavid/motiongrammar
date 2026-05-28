@@ -35,25 +35,35 @@ trace_pre <- initiate(
              drop_outliers = TRUE)
 ```
 
-`interpolate()` repairs the gap in our GPS data by constructing a dense,
-evenly-spaced time grid at the target frame rate and filling missing
-positions.
+`interpolate()` repairs gaps in motion data by constructing a dense and
+evenly spaced time grid at the target frame rate. In other words, we use
+this step to fill missing positions.
 
 ------------------------------------------------------------------------
 
 ## 1. Why we interpolate
 
 When we are filtering or calculating derivatives like velocity, we
-assume our data is dense or evenly spaced. In other words, we expect a
-position coordinate for every time stamp. Unfortunately, devices can
-drop out so this is not always the case. Interpolation allows us to make
-an educated guess on what the coordinate *should be* when drop outs
-occur. This is another thing that is usually done by providers, but is
-useful to check when publishing a paper.
+assume our data is evenly spaced (ie., there is one row every 10th of a
+second for every coordinate). Unfortunately, devices drop out so this is
+not always true Interpolation allows us to make an educated guess on
+what the coordinate *should be* when drop outs occur. This is another
+thing that is usually done by providers, but is useful to check when
+publishing a paper.
 
 ------------------------------------------------------------------------
 
 ## 2. Basic usage
+
+Here, you just need to set the interpolation method (explained more
+depth below), the sample rate and the maximum gap in frames. We set a
+max gap in frames, because sometimes dropouts can be *so extreme* that
+our ability to make an educated guess becomes questionable. In the
+example below, we fill any drop outs less than 20 samples (2 seconds,
+because 10 Hz x 2 seconds = 20). But if there was a drop out of, for
+example, ten thousand seconds, then we truly have no idea where the
+player was in that time. All interpolation methods can only connect
+"when we saw the player last" to "when we see them again".
 
 ```{r interpolate}
 trace <- trace_pre |>
@@ -80,7 +90,7 @@ trace |>
   geom_point(size = 0.4, alpha = 0.6) +
   coord_fixed() +
   scale_colour_manual(
-    values = c("FALSE" = "steelblue", "TRUE" = "firebrick2"),
+    values = c("FALSE" = "#2B7C85", "TRUE" = "#FF6F59"),
     labels = c("FALSE" = "Recorded", "TRUE" = "Interpolated")
   ) +
   labs(
@@ -173,7 +183,7 @@ ratio (\> 20–30%) is flagged as an issue.
 ## Quick reference
 
 | Argument | Default | Purpose |
-|----|----|----|
+|------------------------|------------------------|------------------------|
 | `method` | `"linear"` | `"linear"`, `"spline"`, or `"constant"` |
 | `hz` | from metadata | Target frame rate |
 | `max_gap_frames` | `5` | Gaps larger than this (frames) are left as NA |

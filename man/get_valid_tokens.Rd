@@ -4,7 +4,7 @@
 \alias{get_valid_tokens}
 \title{Refresh Strava API Tokens}
 \usage{
-get_valid_tokens(tokens, verbose = TRUE)
+get_valid_tokens(tokens, verbose = TRUE, token_path = "~/strava_tokens.json")
 }
 \arguments{
 \item{tokens}{A list containing client_id, client_secret, refresh_token, and access_token.}

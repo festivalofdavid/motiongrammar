@@ -33,24 +33,25 @@ trace_raw <- initiate(
 )
 ```
 
-`coordinate()` is the second step in every GPS pipeline. It converts the
-raw latitude and longitude values produced by `initiate()` into a flat,
-metre-scale Cartesian plane where distances, velocities, and headings
-become meaningful numbers.
+`coordinate()` is the second step in our pipeline. It converts the raw
+latitude and longitude values produced by `initiate()` into a metres on
+a Cartesian Plane where distances, velocities, and headings become
+meaningful numbers. As you may have gathered, this is only really
+relevant for GPS systems which record latitude and longitude, and not
+(x,y) like a local system would.
 
 ------------------------------------------------------------------------
 
-## 1. Why projection matters
+## 1. Projections
 
 GPS coordinates are angles on a sphere (degrees of latitude and
 longitude). You cannot compute Euclidean distance, velocity, or
 acceleration directly from them. A one-degree change in longitude means
-roughly 111 km at the equator but only 78 km at 45° latitude — and the
-difference grows as you move toward the poles.
+roughly 111 km at the equator but only 78 km at 45° latitude.
 
 `coordinate()` projects those angles onto a flat 2-D surface using a
 standard coordinate reference system (CRS), so that every unit is
-metres and arithmetic is geometrically correct.
+metres.
 
 ------------------------------------------------------------------------
 
@@ -74,10 +75,10 @@ trace <- trace_raw |>
 
 After `coordinate()` the trace gains three new columns:
 
-| Column | Content                                               |
-|--------|-------------------------------------------------------|
-| `x`    | Easting in metres (positive = East)                   |
-| `y`    | Northing in metres (positive = North)                 |
+| Column | Content                                                      |
+|--------|--------------------------------------------------------------|
+| `x`    | East/West in metres (positive = East)                        |
+| `y`    | North/South in metres (positive = North)                     |
 | `z`    | Altitude in metres (from `altitude` if present, otherwise 0) |
 
 The original `lat`, `lng`, and `altitude` columns are kept alongside
@@ -99,25 +100,27 @@ trace |>
   theme(panel.grid = element_blank())
 ```
 
-The axes are six-to-eight digit numbers — correct but hard to interpret.
-`norm = TRUE` fixes this.
+The axes are six-to-eight digit numbers. Although technically correct,
+this is super unintuitive. `norm = TRUE` fixes this.
 
 ------------------------------------------------------------------------
 
 ## 3. Choosing a CRS
 
 The CRS (coordinate reference system) controls how degrees are projected
-into metres.
+into metres. This will depend on where in the world you are/what stadium
+you are playing or training in.
 
-| EPSG code | Name                         | Best for                          |
-|-----------|------------------------------|-----------------------------------|
-| **3857**  | Web Mercator (default)       | Most sports science applications  |
-| **32754** | UTM Zone 54S                 | Australia / New Zealand           |
-| **27700** | British National Grid        | United Kingdom                    |
-| **2263**  | New York State Plane         | Specific US regions               |
+| EPSG code | Name                   | Best for                         |
+|-----------|------------------------|----------------------------------|
+| **3857**  | Web Mercator (default) | Most sports science applications |
+| **32754** | UTM Zone 54S           | Australia / New Zealand          |
+| **27700** | British National Grid  | United Kingdom                   |
+| **2263**  | New York State Plane   | Specific US regions              |
 
-For field-sport GPS the differences between projections are sub-centimetre
-over a playing arena. Web Mercator (`3857`) is the safe default.
+For field sport GPS the differences between projections are
+sub-centimetre over a playing arena. Web Mercator (`3857`) is the safe
+default.
 
 ------------------------------------------------------------------------
 
@@ -151,13 +154,18 @@ trace |>
 
 Every subsequent position is expressed as metres from where the player
 was first recorded. Plots are compact and comparable across sessions.
+This is certainly not ideal if you are planning tactical analysis, but
+for physical analysis it is totally fine.
 
-### `norm = c(x, y)` — custom absolute origin
+### `norm = c(x, y)` – custom absolute origin
 
 If you want all players in a session to share a common reference point
 (e.g. the south-west corner of the field), pass an absolute projected
 coordinate. All players will share the same (0, 0), so trajectories can
-be overlaid on a field diagram.
+be overlaid on a field diagram. If you have plans for tactical analysis
+at some point, I'd do this even if it's annoying. You can roughly work
+this out using Google Maps to get latitude (first argument) and
+longitude (second argument) to match the centre of the field.
 
 ```{r norm-custom, eval=FALSE}
 field_sw_corner <- c(-13952.6,
@@ -174,8 +182,8 @@ trace <- trace_raw |>
 
 ### `norm = FALSE` — keep absolute projected coordinates
 
-Use this when you need to do spatial joins with other geographic data
-or overlay on a map tile.
+Use this when you need to do spatial joins with other geographic data or
+overlay on a map tile.
 
 ------------------------------------------------------------------------
 
@@ -212,9 +220,10 @@ degrees) is recorded in both `metadata` and the quality log.
 
 ## 6. Dropping outliers
 
-GPS occasionally produces errant readings — phantom positions hundreds of
-metres off-field. `drop_outliers = TRUE` replaces any position outside
-**3 × IQR** fences on x or y with `NA`.
+GPS occasionally produces errant readings — phantom positions hundreds
+of metres off-field. `drop_outliers = TRUE` replaces any position
+outside **3 × IQR** fences on x or y with `NA`. This is entirely a
+heuristic and based on your practitioner judgment.
 
 ```{r drop-outliers}
 trace <- trace_raw |>
@@ -242,16 +251,17 @@ trace |>
   theme(panel.grid = element_blank())
 ```
 
-The outlier count, percentage, and IQR bounds are recorded in the quality
-log. `interpolate()` will fill the resulting NAs in the next step.
+The outlier count, percentage, and IQR bounds are recorded in the
+quality log. `interpolate()` will fill the resulting NAs in the next
+step.
 
 ------------------------------------------------------------------------
 
-## 7. Unit conversion for local-coordinate data
+## 7. (x,y) Unit conversion
 
 If your data is already in local Cartesian coordinates (e.g. yards from
-a local positioning system), `coordinate()` can convert units in the same
-step without any reprojection:
+a local positioning system), `coordinate()` can convert units in the
+same step without any reprojection:
 
 ```{r units, eval=FALSE}
 trace <- initiate(
@@ -276,8 +286,12 @@ Supported unit strings: `"mm"`, `"cm"`, `"m"`, `"km"`, `"in"`, `"ft"`,
 
 ## 8. Reading the quality log
 
+Rather than spitting out the entire quality log constantly, we can just
+look at an individual step. Take a look below:
+
 ```{r quality}
-quality_report(trace)
+quality_report(trace,
+               step = 'coordinate')
 ```
 
 The coordinate section reports the conversion path, CRS codes and name,
@@ -288,13 +302,13 @@ metres, zero-GPS rows removed, and any outliers flagged or dropped.
 
 ## Quick reference
 
-| Argument        | Default      | Purpose                                           |
-|-----------------|--------------|---------------------------------------------------|
-| `from`          | `"latlong"`  | Source coordinate type                            |
-| `to`            | `"xyz"`      | Target type (always `"xyz"`)                      |
-| `crs`           | `3857`       | EPSG projection code                              |
-| `norm`          | `FALSE`      | `TRUE` → first-row origin; `c(x,y)` → custom     |
-| `rotate`        | `NULL`       | List of two `c(lat, lng)` sideline points         |
-| `drop_outliers` | `FALSE`      | Replace 3×IQR outliers with NA                    |
-| `from_units`    | `NULL`       | Source units for xyz → xyz conversion             |
-| `to_units`      | `"m"`        | Target units                                      |
+| Argument        | Default     | Purpose                                      |
+|----------------|----------------|-----------------------------------------|
+| `from`          | `"latlong"` | Source coordinate type                       |
+| `to`            | `"xyz"`     | Target type (always `"xyz"`)                 |
+| `crs`           | `3857`      | EPSG projection code                         |
+| `norm`          | `FALSE`     | `TRUE` → first-row origin; `c(x,y)` → custom |
+| `rotate`        | `NULL`      | List of two `c(lat, lng)` sideline points    |
+| `drop_outliers` | `FALSE`     | Replace 3×IQR outliers with NA               |
+| `from_units`    | `NULL`      | Source units for xyz → xyz conversion        |
+| `to_units`      | `"m"`       | Target units                                 |

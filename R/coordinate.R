@@ -540,6 +540,16 @@ coordinate <- function(.data,
   rows_before <- nrow(.data)
   cols_before <- names(.data)
 
+  if (!is.null(rotate) && isFALSE(norm)) {
+    warning(
+      "coordinate(): rotate is set but norm = FALSE. ",
+      "Rotation shifts the coordinate grid and can move values into negative Cartesian space. ",
+      "Downstream metrics or visualisations that assume a positive-origin canvas may clip or invert. ",
+      "Consider setting norm = TRUE to re-zero the origin to (0, 0) after rotation.",
+      call. = FALSE
+    )
+  }
+
   .crs_check(.data, crs, from)
   conversions <- coord_conversions(from_units, to_units)
 

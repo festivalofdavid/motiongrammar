@@ -7,7 +7,8 @@
 #' @return A list of updated tokens.
 #' @keywords internal
 get_valid_tokens <- function(tokens,
-                            verbose = TRUE){
+                            verbose = TRUE,
+                            token_path = '~/strava_tokens.json'){
   now <- as.integer(Sys.time())
 
   if(!is.null(tokens$expires_at) && (tokens$expires_at - now) > 120){
@@ -29,11 +30,22 @@ get_valid_tokens <- function(tokens,
   tokens$refresh_token <- resp$refresh_token
   tokens$expires_at <- resp$expires_at
 
-  path <- path.expand('~/strava_tokens.json')
-  writeLines(jsonlite::toJSON(tokens,
-                              auto_unbox = TRUE,
-                              pretty = TRUE),
-    path
+  path <- path.expand(token_path)
+  if (!dir.exists(dirname(path))) {
+    fallback <- file.path(tempdir(), basename(path))
+    warning(
+      "Token path directory not writable: ", dirname(path),
+      "\nFalling back to: ", fallback,
+      call. = FALSE
+    )
+    path <- fallback
+  }
+  tryCatch(
+    writeLines(jsonlite::toJSON(tokens, auto_unbox = TRUE, pretty = TRUE), path),
+    error = function(e) warning(
+      "Could not write refreshed tokens to '", path, "': ", conditionMessage(e),
+      call. = FALSE
+    )
   )
 
   return(tokens)
@@ -1977,7 +1989,8 @@ initiate <- function(source = 'auto',
 
       tokens <- get_valid_tokens(
         jsonlite::fromJSON(path.expand(tok_path)),
-        verbose = verbose
+        verbose = verbose,
+        token_path = tok_path
       )
 
       meta <- httr2::resp_body_json(
@@ -2887,7 +2900,9 @@ initiate_template_csv <- function(.data_path, template) {
     for (er in extra_resolved) {
       raw <- df[[er$idx]]
       num_attempt <- parse_num(raw)
-      output[[er$name]] <- if (mean(is.na(num_attempt)) <= 0.5) num_attempt else raw
+      # Numeric only if every non-NA value converted cleanly; otherwise character.
+      # Strict type prevents double↔character mismatch when binding rows across files.
+      output[[er$name]] <- if (all(!is.na(num_attempt) | is.na(raw))) num_attempt else as.character(raw)
     }
   }
 
@@ -3544,7 +3559,6 @@ fetch_generic_streams <- function(session, template) {
   )
 
   available_fields <- names(raw_fields)
-  n_rows <- if (length(raw_fields) > 0) length(raw_fields[[1]]) else 0L
   output <- list()
 
   # ── Time ──────────────────────────
@@ -3566,19 +3580,40 @@ fetch_generic_streams <- function(session, template) {
     stop("fetch_generic_streams(): unsupported time_type '", t$time_type, "'", call. = FALSE)
   )
 
+  # Canonical row count: anchored to the resolved time grid, not raw_fields[[1]].
+  n_rows <- length(output[["unix_time"]])
+
+  # Pad or truncate any stream whose length differs from the time grid.
+  .align_to_grid <- function(vec, field_name) {
+    n <- length(vec)
+    if (n == n_rows) return(vec)
+    warning(sprintf(
+      "fetch_generic_streams(): stream '%s' has %d element(s) but the time grid has %d. %s.",
+      field_name, n, n_rows,
+      if (n < n_rows) "Padding tail with NA" else "Truncating to time grid length"
+    ), call. = FALSE)
+    if (n < n_rows) {
+      c(vec, rep(if (is.numeric(vec)) NA_real_ else NA_character_, n_rows - n))
+    } else {
+      vec[seq_len(n_rows)]
+    }
+  }
+
   # ── Coordinates ────────
   # stream_latlng (combined pairs) only honoured in streams/columnar formats
   if (!is.null(t$stream_latlng) && t$response_format %in% c("streams", "columnar")) {
     pairs_src <- if (t$response_format == "streams") data[[t$stream_latlng]][[t$stream_data_key %||% "data"]]
                  else data[[t$stream_latlng]]
     if (!is.null(pairs_src)) {
-      output[["lat"]] <- purrr::map_dbl(pairs_src, 1)
-      output[["lng"]] <- purrr::map_dbl(pairs_src, 2)
+      lat_raw <- purrr::map_dbl(pairs_src, 1)
+      lng_raw <- purrr::map_dbl(pairs_src, 2)
+      output[["lat"]] <- .align_to_grid(lat_raw, t$stream_latlng)
+      output[["lng"]] <- .align_to_grid(lng_raw, t$stream_latlng)
     }
   } else {
     if (!is.null(t$stream_lat)) {
       if (t$stream_lat %in% available_fields)
-        output[["lat"]] <- as.numeric(raw_fields[[t$stream_lat]])
+        output[["lat"]] <- .align_to_grid(as.numeric(raw_fields[[t$stream_lat]]), t$stream_lat)
       else
         warning(sprintf(
           "stream_lat '%s' not found in API response. Available: %s",
@@ -3587,7 +3622,7 @@ fetch_generic_streams <- function(session, template) {
     }
     if (!is.null(t$stream_lng)) {
       if (t$stream_lng %in% available_fields)
-        output[["lng"]] <- as.numeric(raw_fields[[t$stream_lng]])
+        output[["lng"]] <- .align_to_grid(as.numeric(raw_fields[[t$stream_lng]]), t$stream_lng)
       else
         warning(sprintf(
           "stream_lng '%s' not found in API response. Available: %s",
@@ -3596,10 +3631,10 @@ fetch_generic_streams <- function(session, template) {
     }
   }
 
-  .map_field <- function(key, out_nm){
+  .map_field <- function(key, out_nm) {
     if (!is.null(key)) {
       if (key %in% available_fields)
-        output[[out_nm]] <<- as.numeric(raw_fields[[key]])
+        output[[out_nm]] <<- .align_to_grid(as.numeric(raw_fields[[key]]), key)
       else
         warning(sprintf(
           "stream '%s' not found in API response. Available: %s",
@@ -3628,7 +3663,10 @@ fetch_generic_streams <- function(session, template) {
       if (key %in% available_fields) {
         raw <- raw_fields[[key]]
         num <- suppressWarnings(as.numeric(raw))
-        output[[out_nm]] <- if (mean(is.na(num)) <= 0.5) num else raw
+        # Numeric only if every non-NA value converted cleanly; otherwise character.
+        # Strict type prevents double↔character mismatch across batch API calls.
+        typed <- if (all(!is.na(num) | is.na(raw))) num else as.character(raw)
+        output[[out_nm]] <- .align_to_grid(typed, key)
       } else {
         warning(sprintf(
           "extra stream '%s' not found in API response. Available: %s",
