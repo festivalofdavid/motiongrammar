@@ -237,6 +237,12 @@ interpolate <- function(.data,
                         max_gap_frames = 5){
 
   validate_motion_trace(.data, 'interpolate')
+
+  if (nrow(.data) == 0) {
+    message("interpolate(): input has 0 rows — returning unchanged.")
+    return(.data)
+  }
+
   n_input_rows <- nrow(.data)
   cols_before <- names(.data)
 

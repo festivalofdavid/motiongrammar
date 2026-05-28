@@ -217,7 +217,7 @@ coord_normalise <- function(output, norm){
     if(is.na(first_valid)) return(output)
     origin_x <- output$x[first_valid]
     origin_y <- output$y[first_valid]
-    origin_z <- output$z[first_valid]
+    origin_z <- if ('z' %in% names(output) && isTRUE(!is.na(output$z[first_valid]))) output$z[first_valid] else 0
   } else if(is.numeric(norm) && length(norm) >= 2){
     origin_x <- norm[1]
     origin_y <- norm[2]

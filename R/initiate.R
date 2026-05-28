@@ -1175,7 +1175,7 @@ quality_report <- function(.data, step = NULL){
   if(!is.null(meta)){
     cat(sprintf("Session: %s\n", meta$name))
     cat(sprintf("Source:  %s\n", meta$source))
-    if(!is.na(meta$player_id)){
+    if(isTRUE(!is.na(meta$player_id))){
       cat(sprintf("Player:  %s\n", meta$player_id))
     }
     cat("\n")
@@ -1231,21 +1231,21 @@ quality_report <- function(.data, step = NULL){
                   s$completeness * 100,
                   format(s$valid_coordinates, big.mark = ",")))
 
-      if(!is.na(s$native_hz)){
+      if(isTRUE(!is.na(s$native_hz))){
         cat(sprintf("  Sample Rate:   %.2f Hz (%.3f s median interval)\n",
                     s$native_hz, s$median_dt))
       }
 
       cat(sprintf("  Duration:      %.1f minutes\n", s$duration_sec / 60))
 
-      if(s$n_gaps > 0){
+      if(isTRUE(s$n_gaps > 0)){
         cat(sprintf("  Gaps:          %d (%.1f%% of intervals, largest: %.1fs)\n",
                     s$n_gaps, s$gap_percentage, s$largest_gap_sec))
       } else {
         cat("  Gaps:          None detected\n")
       }
 
-      if(s$n_duplicates > 0){
+      if(isTRUE(s$n_duplicates > 0)){
         cat(sprintf("  Duplicates:    %d timestamps\n", s$n_duplicates))
       }
 
@@ -1847,11 +1847,11 @@ print.motion_trace <- function(x, ...){
   cat(sprintf("Motion Trace (%s)\n", meta$source))
   cat(sprintf("├─ Session: %s\n", meta$name))
 
-  if(!is.na(meta$player_id)){
+  if(isTRUE(!is.na(meta$player_id))){
     cat(sprintf("├─ Player:  %s\n", meta$player_id))
   }
 
-  if(!is.na(meta$native_hz)){
+  if(isTRUE(!is.na(meta$native_hz))){
     cat(sprintf("├─ Sample:  %.1f Hz\n", meta$native_hz))
   }
 
@@ -1867,7 +1867,7 @@ print.motion_trace <- function(x, ...){
 
   if(!is.null(qual) && !is.null(qual$initiate)){
     latest_initiate <- qual$initiate[[length(qual$initiate)]]
-    if(latest_initiate$qc_pass){
+    if(isTRUE(latest_initiate$qc_pass)){
       cat("└─ QC:      ✓ Pass\n")
     } else {
       n_issues <- length(latest_initiate$issues)
@@ -3547,7 +3547,7 @@ fetch_generic_streams <- function(session, template) {
   n_rows <- if (length(raw_fields) > 0) length(raw_fields[[1]]) else 0L
   output <- list()
 
-  # ── Time ──────────────────────────────────────────────────────────────────
+  # ── Time ──────────────────────────
   time_raw <- raw_fields[[t$stream_time]]
   if (is.null(time_raw)) {
     stop(sprintf(
@@ -3566,7 +3566,7 @@ fetch_generic_streams <- function(session, template) {
     stop("fetch_generic_streams(): unsupported time_type '", t$time_type, "'", call. = FALSE)
   )
 
-  # ── Coordinates ───────────────────────────────────────────────────────────
+  # ── Coordinates ────────
   # stream_latlng (combined pairs) only honoured in streams/columnar formats
   if (!is.null(t$stream_latlng) && t$response_format %in% c("streams", "columnar")) {
     pairs_src <- if (t$response_format == "streams") data[[t$stream_latlng]][[t$stream_data_key %||% "data"]]
@@ -3596,7 +3596,7 @@ fetch_generic_streams <- function(session, template) {
     }
   }
 
-  .map_field <- function(key, out_nm) {
+  .map_field <- function(key, out_nm){
     if (!is.null(key)) {
       if (key %in% available_fields)
         output[[out_nm]] <<- as.numeric(raw_fields[[key]])
@@ -3614,7 +3614,7 @@ fetch_generic_streams <- function(session, template) {
   .map_field(t$stream_velocity,     "velocity")
   .map_field(t$stream_acceleration, "acceleration")
 
-  # ── Extra streams ─────────────────────────────────────────────────────────
+  # ── Extra streams ──────────────────────
   if (!is.null(t$stream_extra) && length(t$stream_extra) > 0) {
     extra_nms <- names(t$stream_extra)
     out_names_extra <- vapply(seq_along(t$stream_extra), function(i) {
@@ -3638,7 +3638,7 @@ fetch_generic_streams <- function(session, template) {
     }
   }
 
-  # ── Fill missing core cols and assemble ───────────────────────────────────
+  # ── Fill missing core cols and assemble ──
   core_cols <- if (t$coord_system == "local") c("unix_time", "x", "y", "z")
                else c("unix_time", "lat", "lng", "altitude")
 

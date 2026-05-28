@@ -83,6 +83,10 @@ quantitate <- function(
     band_cols <- character(0)
   }
 
+  if (scope %in% c('designation', 'active') && !'designation' %in% names(.data)) {
+    stop("quantitate(): scope = '", scope, "' requires a 'designation' column. Run designate() first.")
+  }
+
   existing_groups <- dplyr::group_vars(.data)
 
   # Row filtering — use isTRUE(grepl()) pattern via %in% NA-safe comparison so

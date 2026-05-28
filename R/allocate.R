@@ -41,8 +41,8 @@ allocate <- function(
   .apply_bands <- function(x, thresholds) {
     labels <- paste0('band_', seq_len(length(thresholds) - 1))
     idx <- findInterval(x, thresholds)
-    # Values below the lowest threshold are invalid (e.g. negative velocity) → NA
-    idx[idx == 0] <- NA_integer_
+    # Values below the lowest threshold are clamped to band_1 (resting/stationary floor)
+    idx[idx == 0] <- 1L
     # Values above the highest threshold belong to the top band (open-ended upper bound)
     idx[!is.na(idx) & idx > length(labels)] <- length(labels)
     factor(labels[idx], levels = labels, ordered = TRUE)
@@ -96,7 +96,7 @@ allocate <- function(
       fn = 'findInterval',
       package = 'base',
       output_type = 'ordered factor',
-      out_of_range = 'values below minimum threshold → NA; values above maximum threshold → top band (open-ended upper bound)',
+      out_of_range = 'values below minimum threshold → band_1 (resting/stationary floor); values above maximum threshold → top band (open-ended upper bound)',
       abs_applied = 'acceleration, angular_velocity (absolute value taken before banding)'
     )
   )

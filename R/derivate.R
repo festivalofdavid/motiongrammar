@@ -97,13 +97,17 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
   out <- .data |>
     dplyr::arrange(unix_time) |>
     dplyr::mutate(
-      .dt_vel = unix_time - dplyr::lag(unix_time, n = w_vel),
-      .dt_vel = dplyr::if_else(.dt_vel <= 0 | is.na(.dt_vel), NA_real_, .dt_vel),
-      .dx_vel = .data[[x_col]] - dplyr::lag(.data[[x_col]], n = w_vel),
-      .dy_vel = .data[[y_col]] - dplyr::lag(.data[[y_col]], n = w_vel),
-      distance = sqrt(.dx_vel^2 + .dy_vel^2),
-      velocity = distance / .dt_vel,
-      heading = dplyr::if_else(
+      # Gap guard: any NA in the closed window [i-w_vel, i] → artificial spike risk
+      .cumna_coord = cumsum(is.na(.data[[x_col]])),
+      .gap_vel     = (.cumna_coord - dplyr::lag(.cumna_coord, n = w_vel + 1L, default = 0L)) > 0L,
+      .dt_vel      = unix_time - dplyr::lag(unix_time, n = w_vel),
+      .dt_vel      = dplyr::if_else(.dt_vel <= 0 | is.na(.dt_vel), NA_real_, .dt_vel),
+      .dx_vel      = .data[[x_col]] - dplyr::lag(.data[[x_col]], n = w_vel),
+      .dy_vel      = .data[[y_col]] - dplyr::lag(.data[[y_col]], n = w_vel),
+      distance     = sqrt(.dx_vel^2 + .dy_vel^2),
+      distance     = dplyr::if_else(.gap_vel, NA_real_, distance),
+      velocity     = distance / .dt_vel,
+      heading      = dplyr::if_else(
         velocity >= speed_floor,
         atan2(.dy_vel, .dx_vel) * (180 / pi),
         NA_real_
@@ -123,19 +127,30 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
   # ---- ACCELERATION ----
   out <- out |>
     dplyr::mutate(
-      .dt_acc = unix_time - dplyr::lag(unix_time, n = w_acc),
-      .dt_acc = dplyr::if_else(.dt_acc <= 0 | is.na(.dt_acc), NA_real_, .dt_acc),
-      acceleration = (velocity - dplyr::lag(velocity, n = w_acc)) / .dt_acc
+      # Gap guard: any velocity NA in the [i-w_acc, i] window → acceleration spike risk
+      .cumna_vel   = cumsum(is.na(velocity)),
+      .gap_acc     = (.cumna_vel - dplyr::lag(.cumna_vel, n = w_acc + 1L, default = 0L)) > 0L,
+      .dt_acc      = unix_time - dplyr::lag(unix_time, n = w_acc),
+      .dt_acc      = dplyr::if_else(.dt_acc <= 0 | is.na(.dt_acc), NA_real_, .dt_acc),
+      acceleration = (velocity - dplyr::lag(velocity, n = w_acc)) / .dt_acc,
+      acceleration = dplyr::if_else(.gap_acc, NA_real_, acceleration)
     )
 
   # ---- JERK (before NA fill; acceleration may still have NAs) ----
   if ("jerk" %in% requested) {
     out <- out |> dplyr::mutate(
-      .dt_jerk = unix_time - dplyr::lag(unix_time, n = w_jerk),
-      .dt_jerk = dplyr::if_else(.dt_jerk <= 0 | is.na(.dt_jerk), NA_real_, .dt_jerk),
-      jerk = (acceleration - dplyr::lag(acceleration, n = w_jerk)) / .dt_jerk
+      .cumna_acc = cumsum(is.na(acceleration)),
+      .gap_jerk  = (.cumna_acc - dplyr::lag(.cumna_acc, n = w_jerk + 1L, default = 0L)) > 0L,
+      .dt_jerk   = unix_time - dplyr::lag(unix_time, n = w_jerk),
+      .dt_jerk   = dplyr::if_else(.dt_jerk <= 0 | is.na(.dt_jerk), NA_real_, .dt_jerk),
+      jerk       = (acceleration - dplyr::lag(acceleration, n = w_jerk)) / .dt_jerk,
+      jerk       = dplyr::if_else(.gap_jerk, NA_real_, jerk)
     )
   }
+
+  # Capture gap-protection counts before temporary columns are removed
+  n_gap_vel_rows <- sum(out$.gap_vel, na.rm = TRUE)
+  n_gap_acc_rows <- if (".gap_acc" %in% names(out)) sum(out$.gap_acc, na.rm = TRUE) else 0L
 
   # Clean up temporary columns and fill NAs
   out <- out |>
@@ -180,6 +195,12 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
   issues <- character(0)
   if (!used_filtered && use_filtered) {
     issues <- c(issues, 'Filtered coordinates not available; fell back to raw (x, y).')
+  }
+  if (n_gap_vel_rows > 0) {
+    issues <- c(issues, sprintf(
+      '%d row(s) gap-protected: velocity zeroed where derivative window spans a coordinate gap.',
+      n_gap_vel_rows
+    ))
   }
 
   qual <- attr(out, 'quality')
@@ -278,6 +299,10 @@ derivate <- function(.data, use_filtered = TRUE, window = NULL,
     parameters = params,
     algorithms = algos,
     outputs = outputs,
+    gap_protected_rows = list(
+      velocity     = n_gap_vel_rows,
+      acceleration = n_gap_acc_rows
+    ),
     dependencies = setNames(dep_versions, c('dplyr', 'tidyr')),
     issues = issues
   )

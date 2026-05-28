@@ -48,6 +48,18 @@ designate <- function(.data,
   }
   finite_vel <- .data$velocity[finite_idx]
 
+  if (length(finite_vel) < 2) {
+    # PELT requires >2 observations; degenerate case — single segment
+    .data$designation <- NA_character_
+    .data$designation[finite_idx] <- 'active_1'
+    .data$designation <- zoo::na.locf(.data$designation, na.rm = FALSE)
+    .data$designation <- zoo::na.locf(.data$designation, na.rm = FALSE, fromLast = TRUE)
+    .data$designation <- tidyr::replace_na(.data$designation, 'active_1')
+    cp_indices <- integer(0)
+    cp_segment_lengths <- length(finite_vel)
+    refined <- .data
+  } else {
+
   # 2. Get PELT statistical bounds
   m_pelt <- changepoint::cpt.mean(
     data      = finite_vel,
@@ -127,6 +139,7 @@ designate <- function(.data,
   .data$designation <- zoo::na.locf(.data$designation, na.rm = FALSE, fromLast = TRUE)
 
   refined <- .data
+  } # end length(finite_vel) >= 2 branch
   } else if (method == 'manual') {
 
     if (is.null(file)) {

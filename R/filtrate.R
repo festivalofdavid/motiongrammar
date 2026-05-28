@@ -6,6 +6,7 @@
 #' @return Numeric vector of the same length (with NAs at edges).
 #' @keywords internal
 filt_sma <- function(x, window = 5) {
+  if (length(x) < window) return(rep(NA_real_, length(x)))
   weights <- rep(1 / window, window)
   as.numeric(stats::filter(x, filter = weights, sides = 2))
 }
@@ -18,6 +19,7 @@ filt_sma <- function(x, window = 5) {
 #' @return Numeric vector of the same length.
 #' @keywords internal
 filt_ema <- function(x, alpha = 0.3) {
+  if (length(x) < 2) return(rep(NA_real_, length(x)))
   as.numeric(stats::filter(x * alpha, filter = 1 - alpha, method = 'recursive'))
 }
 
@@ -209,8 +211,12 @@ filtrate <- function(.data,
   # Resolve which columns to filter
   target_cols <- .resolve_target_cols(target, .data)
 
-  # Validation: enough non-NA data to filter
+  # Validation: column exists and has enough non-NA data to filter
   for (col in target_cols) {
+    if (!col %in% names(.data)) {
+      stop('Column "', col, '" not found in data. ',
+           'Run coordinate() before filtrate().')
+    }
     n_valid <- sum(!is.na(.data[[col]]))
     if (n_valid < 4) {
       stop('Not enough valid (non-NA) data in "', col, '" to filter (',
