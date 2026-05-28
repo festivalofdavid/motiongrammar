@@ -510,15 +510,16 @@ coord_quality_log <- function(output, from, to, crs, from_units, to_units, norm,
 #' @param from Character: source coordinate type. Usually \code{'latlong'}.
 #' @param to Character: target coordinate type. Usually \code{'xyz'}.
 #' @param crs Integer; EPSG code of the target projected CRS. Defaults to
-#'   \code{3857} (Web Mercator) for backwards compatibility, but
-#'   \strong{EPSG:3857 is not recommended for athletic kinematics}: its metric
-#'   scale inflates distances by \code{1/cos(lat)} relative to true ground
-#'   metres (~30\% error at 40°N). Specify a local UTM zone for high-precision
-#'   velocity, acceleration, and player-load calculations. Use
-#'   \code{\link{utm_zone_suggest}(.data)} to identify the correct EPSG code
-#'   for your data's location (e.g. \code{32618} for UTM Zone 18N / New York,
-#'   \code{32630} for UTM Zone 30N / London). \code{crs = 4326} (degree units)
-#'   is rejected with an error.
+#'   \code{3857} (Web Mercator). Web Mercator is convenient but introduces a
+#'   metric scale distortion of \code{1/cos(lat) - 1} relative to true ground
+#'   metres — roughly 0.5\% at 30°N and 14\% at 60°N. For high-precision
+#'   velocity, acceleration, and player-load calculations at mid-to-high
+#'   latitudes, use a local conformal projection. Run
+#'   \code{\link{utm_zone_suggest}(.data)} to identify the correct UTM zone
+#'   EPSG code for your data's location (e.g. \code{32618} for UTM Zone 18N /
+#'   New York, \code{32630} for UTM Zone 30N / London). A warning is issued
+#'   automatically when the distortion at your data's latitude exceeds 0.5\%.
+#'   \code{crs = 4326} (degree units) is rejected with an error.
 #' @param norm Logical or Numeric; if TRUE, anchors the trace so the first row is (0,0,0). If a numeric vector (e.g. c(x, y)), sets a custom absolute origin.
 #' @param from_units Character; the units of the source ('m', 'cm', 'mm', 'km', 'ft', 'in', 'yd', 'mi').
 #' @param to_units Character; the units of the target. Defaults to 'm'.
