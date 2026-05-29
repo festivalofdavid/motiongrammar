@@ -10,10 +10,10 @@ vignette: >
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  eval     = FALSE,
-  warning  = FALSE,
-  message  = FALSE
+  comment = "#>",
+  eval = FALSE,
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -78,13 +78,13 @@ processed <- map(ok, "result")
 summaries <- imap(processed, function(trace, session_name) {
   quantitate(
     trace,
-    allocation  = "gps_standard",
-    derivative  = "velocity",
-    scope       = "designation",
+    allocation = "gps_standard",
+    derivative = "velocity",
+    scope = "designation",
     active_only = TRUE,
-    time_s      = n() / 10,
-    peak_vel    = max(velocity, na.rm = TRUE),
-    mean_hr     = mean(HeartRate, na.rm = TRUE)
+    time_s = n() / 10,
+    peak_vel = max(velocity, na.rm = TRUE),
+    mean_hr = mean(HeartRate, na.rm = TRUE)
   ) |>
     mutate(session = session_name, .before = 1)
 })

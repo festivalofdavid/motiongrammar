@@ -13,11 +13,11 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  fig.width  = 7,
+  comment = "#>",
+  fig.width = 7,
   fig.height = 4,
-  warning  = FALSE,
-  message  = FALSE
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -29,7 +29,7 @@ library(dplyr)
 # Load raw GPS trace — we demonstrate coordinate() in this vignette
 trace_raw <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 )
 ```
 
@@ -65,7 +65,7 @@ library(ggplot2)
 library(dplyr)
 
 trace_raw <- initiate(session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-                      source  = 'guess_csv')
+                      source = 'guess_csv')
 
 trace <- trace_raw |>
   coordinate(from = "latlong", 
@@ -174,8 +174,8 @@ field_sw_corner <- c(-13952.6,
 trace <- trace_raw |>
   coordinate(
     from = "latlong",
-    to   = "xyz",
-    crs  = 3857,
+    to = "xyz",
+    crs = 3857,
     norm = field_sw_corner
   )
 ```
@@ -200,10 +200,10 @@ sideline_se <- c(-35.318, 149.136)
 
 trace <- trace_raw |>
   coordinate(
-    from   = "latlong",
-    to     = "xyz",
-    crs    = 3857,
-    norm   = TRUE,
+    from = "latlong",
+    to = "xyz",
+    crs = 3857,
+    norm = TRUE,
     rotate = list(sideline_sw, sideline_se)
   )
 ```
@@ -228,10 +228,10 @@ heuristic and based on your practitioner judgment.
 ```{r drop-outliers}
 trace <- trace_raw |>
   coordinate(
-    from          = "latlong",
-    to            = "xyz",
-    crs           = 3857,
-    norm          = TRUE,
+    from = "latlong",
+    to = "xyz",
+    crs = 3857,
+    norm = TRUE,
     drop_outliers = TRUE
   )
 ```
@@ -265,17 +265,17 @@ same step without any reprojection:
 
 ```{r units, eval=FALSE}
 trace <- initiate(
-  session  = "lps_session.csv",
-  source   = "manual_csv",
+  session = "lps_session.csv",
+  source = "manual_csv",
   col_unix = "Time",
-  col_lat  = "X_yd",
-  col_lng  = "Y_yd"
+  col_lat = "X_yd",
+  col_lng = "Y_yd"
 ) |>
   coordinate(
-    from       = "xyz",
-    to         = "xyz",
+    from = "xyz",
+    to = "xyz",
     from_units = "yd",
-    to_units   = "m"
+    to_units = "m"
   )
 ```
 

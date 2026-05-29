@@ -13,11 +13,11 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  fig.width  = 7,
+  comment = "#>",
+  fig.width = 7,
   fig.height = 4,
-  warning  = FALSE,
-  message  = FALSE
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -29,7 +29,7 @@ library(dplyr)
 # Build through derivate — we demonstrate designate() here
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -76,7 +76,7 @@ library(dplyr)
 
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -86,9 +86,9 @@ trace_pre <- initiate(
 
 trace <- trace_pre |>
   designate(
-    method      = "corbett",
+    method = "corbett",
     v_threshold = 0.3,
-    min_pts     = NULL    # defaults to 5 seconds × Hz = 50 rows
+    min_pts = NULL    # defaults to 5 seconds × Hz = 50 rows
   )
 
 # What segments were found?
@@ -111,9 +111,9 @@ trace |>
     na.value = "grey70"
   ) +
   labs(
-    title  = "Velocity coloured by designation",
-    x      = "Unix time (s)",
-    y      = "Speed (m/s)",
+    title = "Velocity coloured by designation",
+    x = "Unix time (s)",
+    y = "Speed (m/s)",
     colour = "Segment"
   ) +
   theme_minimal() +
@@ -132,8 +132,8 @@ trace |>
     na.value = "grey70"
   ) +
   labs(
-    title  = "Trajectory coloured by designation",
-    x      = "x (m)", y = "y (m)", colour = NULL
+    title = "Trajectory coloured by designation",
+    x = "x (m)", y = "y (m)", colour = NULL
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank(), legend.position = "bottom")
@@ -174,7 +174,7 @@ times, import those labels directly:
 trace <- trace_pre |>
   designate(
     method = "manual",
-    file   = "~/data/session_labels.csv"
+    file = "~/data/session_labels.csv"
   )
 ```
 
@@ -196,11 +196,11 @@ explicit mapping:
 trace <- trace_pre |>
   designate(
     method = "manual",
-    file   = "~/data/annotations.csv",
-    cols   = c(
+    file = "~/data/annotations.csv",
+    cols = c(
       designation = "label",
-      unix_start  = "onset_s",
-      unix_end    = "offset_s"
+      unix_start = "onset_s",
+      unix_end = "offset_s"
     )
   )
 ```

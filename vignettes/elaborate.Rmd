@@ -13,11 +13,11 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  fig.width  = 7,
+  comment = "#>",
+  fig.width = 7,
   fig.height = 4,
-  warning  = FALSE,
-  message  = FALSE
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -29,7 +29,7 @@ library(dplyr)
 # Build through designate — we demonstrate elaborate() here
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -89,7 +89,7 @@ library(dplyr)
 
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -100,9 +100,9 @@ trace_pre <- initiate(
 
 trace <- trace_pre |>
   elaborate(
-    curved_load  = velocity * abs(angular_velocity),
-    velocity_kmh    = velocity * 3.6,
-    is_hsr       = velocity >= 5.5
+    curved_load = velocity * abs(angular_velocity),
+    velocity_kmh = velocity * 3.6,
+    is_hsr = velocity >= 5.5
   )
 
 summary(trace$curved_load)
@@ -114,8 +114,8 @@ call:
 ```{r sequential}
 trace <- trace_pre |>
   elaborate(
-    velocity_kmh  = velocity * 3.6,
-    is_sprint  = velocity_kmh > 25
+    velocity_kmh = velocity * 3.6,
+    is_sprint = velocity_kmh > 25
   )
 ```
 
@@ -139,7 +139,7 @@ trace |>
   coord_fixed() +
   scale_colour_viridis_c(option = "magma", begin = 0.1, end = 0.95) +
   labs(
-    title    = "Curved load — velocity × |angular velocity|",
+    title = "Curved load — velocity × |angular velocity|",
     subtitle = "Bright = high combined velocity and turning",
     x = "x (m)", y = "y (m)", colour = "Curved\nload"
   ) +
@@ -159,8 +159,8 @@ trace |>
   geom_line(linewidth = 0.3, colour = "black") +
   labs(
     title = "Curved load over time",
-    x     = "Unix time (s)",
-    y     = "Curved load (m/s × °/s)"
+    x = "Unix time (s)",
+    y = "Curved load (m/s × °/s)"
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank())
@@ -214,7 +214,7 @@ computational chain embedded in the data object:
 trace <- trace_pre |>
   elaborate(
     curved_load = velocity * abs(angular_velocity),
-    log_expr    = TRUE
+    log_expr = TRUE
   )
 
 # Retrieve the expression from the quality log

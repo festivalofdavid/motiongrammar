@@ -13,11 +13,11 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  fig.width  = 7,
+  comment = "#>",
+  fig.width = 7,
   fig.height = 4,
-  warning  = FALSE,
-  message  = FALSE
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -30,7 +30,7 @@ library(tidyr)
 # Build through filtrate — we demonstrate derivate() here
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -55,7 +55,7 @@ library(tidyr)
 
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -98,8 +98,8 @@ trace |>
   geom_line(linewidth = 0.5, colour = "black") +
   labs(
     title = "Velocity over time",
-    x     = "Unix time (s)",
-    y     = "Velocity (m/s)"
+    x = "Unix time (s)",
+    y = "Velocity (m/s)"
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank())
@@ -130,8 +130,8 @@ trace |>
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
   labs(
     title = "Acceleration over time",
-    x     = "Unix time (s)",
-    y     = "Acceleration (m/s²)"
+    x = "Unix time (s)",
+    y = "Acceleration (m/s²)"
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank())
@@ -158,8 +158,8 @@ trace |>
   geom_line(linewidth = 0.3, colour = "mediumpurple") +
   labs(
     title = "Angular velocity over time",
-    x     = "Unix time (s)",
-    y     = "Angular velocity (°/s)"
+    x = "Unix time (s)",
+    y = "Angular velocity (°/s)"
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank())
@@ -177,9 +177,9 @@ trace |>
   coord_fixed() +
   scale_colour_viridis_c(option = "plasma", begin = 0.1, end = 0.9) +
   labs(
-    title  = "Trajectory coloured by angular velocity",
+    title = "Trajectory coloured by angular velocity",
     subtitle = "Bright = sharp turn; dark = straight running",
-    x      = "x (m)", y = "y (m)",
+    x = "x (m)", y = "y (m)",
     colour = "°/s"
   ) +
   theme_minimal() +
@@ -230,8 +230,8 @@ trace <- trace_pre |> derivate(window = 5)
 trace <- trace_pre |>
   derivate(
     window = list(
-      velocity         = 10,    # 1 s at 10 Hz
-      acceleration     =  5,    # 0.5 s
+      velocity = 10,    # 1 s at 10 Hz
+      acceleration =  5,    # 0.5 s
       angular_velocity = 10
     )
   )

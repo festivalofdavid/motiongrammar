@@ -13,11 +13,11 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  fig.width  = 7,
+  comment = "#>",
+  fig.width = 7,
   fig.height = 4,
-  warning  = FALSE,
-  message  = FALSE
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -29,7 +29,7 @@ library(dplyr)
 # Build trace up to the point before interpolation
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE)
@@ -68,8 +68,8 @@ player was in that time. All interpolation methods can only connect
 ```{r interpolate}
 trace <- trace_pre |>
   interpolate(
-    method         = "linear",
-    hz             = 10,
+    method = "linear",
+    hz = 10,
     max_gap_frames = 20    # fill gaps up to 2 seconds; leave larger ones as NA
   )
 
@@ -94,8 +94,8 @@ trace |>
     labels = c("FALSE" = "Recorded", "TRUE" = "Interpolated")
   ) +
   labs(
-    title  = "Recorded vs interpolated positions",
-    x      = "x (m)", y = "y (m)", colour = NULL
+    title = "Recorded vs interpolated positions",
+    x = "x (m)", y = "y (m)", colour = NULL
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank(), legend.position = "top")
@@ -114,11 +114,11 @@ trace |>
   ggplot(aes(x = unix_time, y = x)) +
   geom_line(colour = "#2B7C85", linewidth = 0.4) +
   geom_point(
-    data  = \(d) filter(d, is_interpolated),
+    data = \(d) filter(d, is_interpolated),
     colour = "#FF6F59", size = 1.2
   ) +
   labs(
-    title    = "Visualising repaired data gaps",
+    title = "Visualising repaired data gaps",
     subtitle = "Orange points = interpolated; line = full reconstructed trajectory",
     x = "Time (Unix seconds)", y = "x (m)"
   ) +

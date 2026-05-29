@@ -13,11 +13,11 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  fig.width  = 7,
+  comment = "#>",
+  fig.width = 7,
   fig.height = 4,
-  warning  = FALSE,
-  message  = FALSE
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -29,7 +29,7 @@ library(dplyr)
 # Build through designate — we demonstrate allocate() here
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -73,7 +73,7 @@ library(dplyr)
 
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -85,7 +85,7 @@ trace_pre <- initiate(
 trace <- trace_pre |>
   allocate(
     allocation = list(
-      velocity     = c(0, 2, 4, 6, 8),
+      velocity = c(0, 2, 4, 6, 8),
       acceleration = c(0, 1, 2, 3, 4),
       angular_velocity = c(0, 90, 180, 270)
     ),
@@ -138,8 +138,8 @@ trace |>
   scale_fill_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
   labs(
     title = "Time in each velocity band (active segment)",
-    x     = "Velocity band",
-    y     = "Duration (s)"
+    x = "Velocity band",
+    y = "Duration (s)"
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank())
@@ -154,8 +154,8 @@ trace |>
   coord_fixed() +
   scale_colour_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
   labs(
-    title  = "Trajectory coloured by velocity band",
-    x      = "x (m)", y = "y (m)",
+    title = "Trajectory coloured by velocity band",
+    x = "x (m)", y = "y (m)",
     colour = "Velocity\nband"
   ) +
   theme_minimal() +
@@ -172,11 +172,11 @@ profiling schemes onto the same trace:
 ```{r multiple}
 trace <- trace_pre |>
   allocate(
-    allocation      = list(velocity = c(0, 2, 4, 6, 8)),
+    allocation = list(velocity = c(0, 2, 4, 6, 8)),
     allocation_name = "club_standard"
   ) |>
   allocate(
-    allocation      = list(velocity = c(0, 1.5, 3, 5, 6.5)),
+    allocation = list(velocity = c(0, 1.5, 3, 5, 6.5)),
     allocation_name = "literature_2023"
   )
 

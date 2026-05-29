@@ -13,11 +13,11 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  fig.width  = 7,
+  comment = "#>",
+  fig.width = 7,
   fig.height = 4,
-  warning  = FALSE,
-  message  = FALSE
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -30,7 +30,7 @@ library(tidyr)
 # Build trace up to interpolation — we demonstrate filtrate() here
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -179,7 +179,7 @@ library(tidyr)
 
 trace_pre <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -189,12 +189,12 @@ trace_pre <- initiate(
 ```{r cutoff-residual, fig.height=4}
 filtrate_cutoff(
   trace_pre,
-  method       = "butterworth",
-  target       = "coordinates",
-  axis         = "x",
-  plot_type    = "residual",
+  method = "butterworth",
+  target = "coordinates",
+  axis = "x",
+  plot_type = "residual",
   cutoff_range = c(0.1, 4),
-  n_steps      = 60
+  n_steps = 60
 )
 ```
 
@@ -214,9 +214,9 @@ higher frequencies. Use this to confirm where the signal ends.
 ```{r cutoff-psd, fig.height=4}
 filtrate_cutoff(
   trace_pre,
-  method    = "butterworth",
-  target    = "coordinates",
-  axis      = "x",
+  method = "butterworth",
+  target = "coordinates",
+  axis = "x",
   plot_type = "psd"
 )
 ```
@@ -226,12 +226,12 @@ filtrate_cutoff(
 ```{r cutoff-both, fig.height=5}
 filtrate_cutoff(
   trace_pre,
-  method       = "butterworth",
-  target       = "coordinates",
-  axis         = "x",
-  plot_type    = "both",
+  method = "butterworth",
+  target = "coordinates",
+  axis = "x",
+  plot_type = "both",
   cutoff_range = c(0.1, 4),
-  n_steps      = 60
+  n_steps = 60
 )
 ```
 
@@ -274,9 +274,9 @@ trace <- trace_pre |>
   filtrate(
     method = "butterworth",
     target = "coordinates",
-    n      = 2,       # 2nd order — standard in biomechanics
+    n = 2,       # 2nd order — standard in biomechanics
     cutoff = 1.5,     # Hz — chosen from filtrate_cutoff() above
-    type   = "low"
+    type = "low"
   )
 ```
 
@@ -294,9 +294,9 @@ window |>
   geom_line(aes(y = f_x, colour = "Filtered"), linewidth = 0.5) +
   scale_colour_manual(values = c(Raw = "firebrick2", Filtered = "steelblue")) +
   labs(
-    title  = "x coordinate — raw vs Butterworth filtered (1.5 Hz, 2nd order)",
-    x      = "Unix time (s)",
-    y      = "x (m)",
+    title = "x coordinate — raw vs Butterworth filtered (1.5 Hz, 2nd order)",
+    x = "Unix time (s)",
+    y = "x (m)",
     colour = NULL
   ) +
   theme_minimal() +
@@ -314,8 +314,8 @@ bind_rows(
   coord_fixed() +
   scale_colour_manual(values = c(Raw = "firebrick2", Filtered = "steelblue")) +
   labs(
-    title  = "Trajectory — raw vs filtered",
-    x      = "x (m)", y = "y (m)", colour = NULL
+    title = "Trajectory — raw vs filtered",
+    x = "x (m)", y = "y (m)", colour = NULL
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank(), legend.position = "top")

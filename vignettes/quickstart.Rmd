@@ -35,7 +35,7 @@ library(motiongrammar)
 library(tidyverse)
 
 exemplar_trace <- initiate(
-    session  = "gps_session.csv",
+    session = "gps_session.csv",
     template = load_csv_template("my_device.xml")
   ) |>
   coordinate(norm = TRUE) |>

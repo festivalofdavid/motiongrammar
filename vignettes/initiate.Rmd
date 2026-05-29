@@ -13,10 +13,10 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  eval     = FALSE,
-  warning  = FALSE,
-  message  = FALSE
+  comment = "#>",
+  eval = FALSE,
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -74,7 +74,7 @@ fully automatic to fully explicit.
 ```{r guess}
 trace <- initiate(
   session = "~/data/player_01.csv",
-  source  = "guess_csv"
+  source = "guess_csv"
 )
 ```
 
@@ -106,11 +106,11 @@ check!
 
 ```{r manual-csv}
 trace <- initiate(
-  session     = "~/data/player_01.csv",
-  source      = "manual_csv",
-  col_unix    = "Timestamp",
-  col_lat     = "Latitude",
-  col_lng     = "Longitude",
+  session = "~/data/player_01.csv",
+  source = "manual_csv",
+  col_unix = "Timestamp",
+  col_lat = "Latitude",
+  col_lng = "Longitude",
   col_altitude = "Elevation"
 )
 ```
@@ -142,11 +142,11 @@ without relying on heuristics.
 ```{r csv-template-manual}
 my_template <- csv_template(
   coord_system = "gps",
-  col_unix     = "Timestamp",
-  col_lat      = "Latitude",
-  col_lng      = "Longitude",
+  col_unix = "Timestamp",
+  col_lat = "Latitude",
+  col_lng = "Longitude",
   col_altitude = "Elevation",
-  skip         = 0L
+  skip = 0L
 )
 
 # Print to verify the mapping
@@ -158,16 +158,16 @@ to preserve something like heart rate, metabolic power or Player Load.
 
 ```{r csv-template-extra}
 my_template <- csv_template(
-  coord_system    = "gps",
-  col_unix        = "Timestamp",
-  col_lat         = "Latitude",
-  col_lng         = "Longitude",
-  col_altitude    = "Elevation",
-  col_velocity    = "Speed",          # imported as `velocity`
+  coord_system = "gps",
+  col_unix = "Timestamp",
+  col_lat = "Latitude",
+  col_lng = "Longitude",
+  col_altitude = "Elevation",
+  col_velocity = "Speed",          # imported as `velocity`
   col_acceleration = "Accel",         # imported as `acceleration`
-  col_extra       = c(
-    player_load  = "PlayerLoad",      # renamed to `player_load`
-    heart_rate   = "HR_bpm"           # renamed to `heart_rate`
+  col_extra = c(
+    player_load = "PlayerLoad",      # renamed to `player_load`
+    heart_rate = "HR_bpm"           # renamed to `heart_rate`
   )
 )
 ```
@@ -180,7 +180,7 @@ resolved schema in one step:
 ```{r guess-csv-template}
 # Inspect and save in one call
 my_template <- guess_csv_template(
-  path      = "~/data/player_01.csv",
+  path = "~/data/player_01.csv",
   save_path = "~/templates/catapult_gps.xml"
 )
 
@@ -211,7 +211,7 @@ trace <- initiate(session = "~/data/player_01.csv",
 
 # Or pass the file path to the template directly.
 trace <- initiate(
-  session  = "~/data/player_01.csv",
+  session = "~/data/player_01.csv",
   template = "~/templates/catapult_gps.xml"
 )
 ```
@@ -229,7 +229,7 @@ Wahoo, Polar, Apple Watch, etc.).
 ```{r gpx}
 trace <- initiate(
   session = "~/data/run_2024-09-14.gpx",
-  source  = "gpx"
+  source = "gpx"
 )
 
 # Or let 'auto' detect the extension
@@ -261,13 +261,13 @@ just focus on key syntax once you're set up.
 # Pass the Strava activity ID (or the full activity URL)
 trace <- initiate(
   session = "12345678901",
-  source  = "strava"
+  source = "strava"
 )
 
 # Full URL also works
 trace <- initiate(
   session = "https://www.strava.com/activities/12345678901",
-  source  = "strava"
+  source = "strava"
 )
 ```
 
@@ -284,19 +284,19 @@ build an `api_stream_template`:
 
 ```{r strava-template}
 strava_my_template <- api_stream_template(
-  api          = "strava",
-  token_path   = "~/credentials/strava.json",
-  stream_time  = "time",
+  api = "strava",
+  token_path = "~/credentials/strava.json",
+  stream_time = "time",
   stream_latlng = "latlng",
   stream_altitude = "altitude",
   stream_extra = c(
     heart_rate = "heartrate",   # rename to heart_rate
-    watts      = "watts"
+    watts = "watts"
   )
 )
 
 trace <- initiate(
-  session  = "12345678901",
+  session = "12345678901",
   template = strava_my_template
 )
 ```
@@ -353,17 +353,17 @@ template.
 
 ```{r generic-api-records}
 my_template <- api_stream_template(
-  api             = "generic",
-  coord_system    = "gps",
-  url             = "https://api.myprovider.io/sessions/{session}/gps",
-  auth_type       = "bearer",
-  auth_value      = "$GPS_API_TOKEN",   # read from env var
+  api = "generic",
+  coord_system = "gps",
+  url = "https://api.myprovider.io/sessions/{session}/gps",
+  auth_type = "bearer",
+  auth_value = "$GPS_API_TOKEN",   # read from env var
   response_format = "records",
-  stream_time     = "timestamp",
-  stream_lat      = "lat",
-  stream_lng      = "lng",
+  stream_time = "timestamp",
+  stream_lat = "lat",
+  stream_lng = "lng",
   stream_altitude = "alt",
-  stream_extra    = c(speed = "velocity_ms")
+  stream_extra = c(speed = "velocity_ms")
 )
 
 trace <- initiate(session = "SESSION_ID_123", template = my_template)
@@ -373,17 +373,17 @@ trace <- initiate(session = "SESSION_ID_123", template = my_template)
 
 ```{r generic-api-columnar}
 my_template <- api_stream_template(
-  api             = "generic",
-  coord_system    = "gps",
-  url             = "https://api.myprovider.io/v2/tracks/{session}",
-  auth_type       = "api_key_query",
-  auth_value      = "$PROVIDER_KEY",
-  auth_param      = "key",
+  api = "generic",
+  coord_system = "gps",
+  url = "https://api.myprovider.io/v2/tracks/{session}",
+  auth_type = "api_key_query",
+  auth_value = "$PROVIDER_KEY",
+  auth_param = "key",
   response_format = "columnar",
-  data_path       = "result.data",     # navigate to resp$result$data
-  stream_time     = "ts",
-  stream_lat      = "latitude",
-  stream_lng      = "longitude"
+  data_path = "result.data",     # navigate to resp$result$data
+  stream_time = "ts",
+  stream_lat = "latitude",
+  stream_lng = "longitude"
 )
 ```
 
@@ -394,7 +394,7 @@ save_api_stream_template(my_template, path = "~/templates/my_provider.xml")
 
 # Load later — or pass the path directly to initiate()
 trace <- initiate(
-  session  = "SESSION_ID_123",
+  session = "SESSION_ID_123",
   template = "~/templates/my_provider.xml"
 )
 ```
@@ -410,10 +410,10 @@ sport are left blank. You may fill those in with `set_metadata()`:
 ```{r set-metadata}
 trace <- trace |>
   set_metadata(
-    player_id   = "P42",
+    player_id = "P42",
     player_name = "Jade Haycraft",
-    team        = "Senior A",
-    sport       = "Ice Skating",
+    team = "Senior A",
+    sport = "Ice Skating",
     session_type = "Training"
   )
 
@@ -449,8 +449,8 @@ my_template <- load_csv_template("~/templates/catapult_gps.xml")
 
 # Collect all CSV files in the session folder
 files <- list.files(
-  path       = "~/data/session_2024-09-14/",
-  pattern    = "\\.csv$",
+  path = "~/data/session_2024-09-14/",
+  pattern = "\\.csv$",
   full.names = TRUE
 )
 
@@ -458,7 +458,7 @@ files <- list.files(
 traces <- map(files, \(f) {
   initiate(session = f, template = my_template) |>
     set_metadata(
-      player_name  = tools::file_path_sans_ext(basename(f)),
+      player_name = tools::file_path_sans_ext(basename(f)),
       session_type = "Match"
     )
 })
@@ -482,20 +482,20 @@ data out to a file just to read it back through `initiate()`. Use
 # Imagine this came from a database query or a bespoke parser
 raw_df <- data.frame(
   timestamp = seq(1700000000, by = 0.1, length.out = 1000),
-  latitude  = 51.5 + cumsum(rnorm(1000, 0, 0.00005)),
+  latitude = 51.5 + cumsum(rnorm(1000, 0, 0.00005)),
   longitude = -0.1 + cumsum(rnorm(1000, 0, 0.00005)),
-  altitude  = 12
+  altitude = 12
 )
 
 trace <- as_motion_trace(
   raw_df,
   coord_system = "gps",
   col_time = "timestamp",
-  col_lat  = "latitude",
-  col_lng  = "longitude",
+  col_lat = "latitude",
+  col_lng = "longitude",
   # Extra metadata passed straight through
   player_name = "Jade Haycraft",
-  sport       = "Football",
+  sport = "Football",
   session_type = "Match"
 )
 
@@ -514,7 +514,7 @@ latitude and longitude. Pass `coord_system = "local"`:
 
 ```{r as-motion-trace-local}
 raw_local <- data.frame(
-  t   = seq(0, 99.9, by = 0.1),
+  t = seq(0, 99.9, by = 0.1),
   pos_x = cumsum(rnorm(1000, 0.05, 0.2)),
   pos_y = cumsum(rnorm(1000, 0.01, 0.2))
 )
@@ -523,10 +523,10 @@ trace <- as_motion_trace(
   raw_local,
   coord_system = "local",
   col_time = "t",
-  col_x    = "pos_x",
-  col_y    = "pos_y",
+  col_x = "pos_x",
+  col_y = "pos_y",
   player_name = "Alex Burnett",
-  sport       = "Basketball"
+  sport = "Basketball"
 )
 ```
 

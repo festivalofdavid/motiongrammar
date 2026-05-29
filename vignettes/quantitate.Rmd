@@ -13,11 +13,11 @@ editor_options:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment  = "#>",
-  fig.width  = 7,
+  comment = "#>",
+  fig.width = 7,
   fig.height = 4,
-  warning  = FALSE,
-  message  = FALSE
+  warning = FALSE,
+  message = FALSE
 )
 ```
 
@@ -29,7 +29,7 @@ library(dplyr)
 # Full pipeline up to allocate — we demonstrate quantitate() here
 trace <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -39,7 +39,7 @@ trace <- initiate(
   designate(method = "corbett", v_threshold = 0.3) |>
   allocate(
     allocation = list(
-      velocity     = c(0, 2, 4, 6, 8),
+      velocity = c(0, 2, 4, 6, 8),
       acceleration = c(0, 1, 2, 3, 4)
     ),
     allocation_name = "gps_standard"
@@ -47,13 +47,16 @@ trace <- initiate(
 ```
 
 `quantitate()` collapses a frame-by-frame `motion_trace` into a tidy
-summary table grouped by designation segment (or session), intensity band, or both.
-You define what to compute — distance, time, peak velocity — and it
-groups and summarises accordingly. This is motiongrammar's take on summarise, but has the advantage of
-preserving the quality and meta objects.
+summary table grouped by designation segment (or session), intensity
+band, or both.
 
-This differs from elaborate, because we get a single value to summarise a drill or session (depending on your scope). 
-Elaborate returns everything second by second.
+Here is where you compute the standard fare, like peak values, means,
+sums etc. This is motiongrammar's take on summarise, but has the
+advantage of preserving the quality and meta objects.
+
+This differs from elaborate, because we get a single value to summarise
+a drill or session (depending on your scope). Elaborate returns
+everything second by second.
 
 ------------------------------------------------------------------------
 
@@ -68,7 +71,7 @@ library(dplyr)
 
 trace <- initiate(
   session = system.file("extdata", "example_gps_file_short.csv", package = "motiongrammar"),
-  source  = 'guess_csv'
+  source = 'guess_csv'
 ) |>
   coordinate(from = "latlong", to = "xyz", crs = 3857, norm = TRUE,
              drop_outliers = TRUE) |>
@@ -78,7 +81,7 @@ trace <- initiate(
   designate(method = "corbett", v_threshold = 0.3) |>
   allocate(
     allocation = list(
-      velocity     = c(0, 2, 4, 6, 8),
+      velocity = c(0, 2, 4, 6, 8),
       acceleration = c(0, 1, 2, 3, 4)
     ),
     allocation_name = "gps_standard"
@@ -92,15 +95,15 @@ library(dplyr)
 
 summary_by_segment <- trace |>
   quantitate(
-    allocation  = "gps_standard",
-    derivative  = "velocity",
-    scope       = "designation",
+    allocation = "gps_standard",
+    derivative = "velocity",
+    scope = "designation",
     active_only = FALSE,
-    n_frames    = dplyr::n(),
-    time_s      = dplyr::n() / 10,
-    dist_m      = sum(distance, na.rm = TRUE),
-    mean_vel    = round(mean(velocity, na.rm = TRUE), 2),
-    peak_vel    = round(max(velocity, na.rm = TRUE), 2)
+    n_frames = dplyr::n(),
+    time_s = dplyr::n() / 10,
+    dist_m = sum(distance, na.rm = TRUE),
+    mean_vel = round(mean(velocity, na.rm = TRUE), 2),
+    peak_vel = round(max(velocity, na.rm = TRUE), 2)
   )
 
 summary_by_segment
@@ -113,10 +116,10 @@ session_totals <- trace |>
   quantitate(
     allocation = "gps_standard",
     derivative = "velocity",
-    scope      = "session",
-    time_s     = dplyr::n() / 10,
-    dist_m     = sum(distance, na.rm = TRUE),
-    peak_vel   = round(max(velocity, na.rm = TRUE), 2)
+    scope = "session",
+    time_s = dplyr::n() / 10,
+    dist_m = sum(distance, na.rm = TRUE),
+    peak_vel = round(max(velocity, na.rm = TRUE), 2)
   )
 
 session_totals
@@ -129,15 +132,16 @@ active_totals <- trace |>
   quantitate(
     allocation = "gps_standard",
     derivative = "velocity",
-    scope      = "active",
-    time_s     = dplyr::n() / 10,
-    dist_m     = sum(distance, na.rm = TRUE)
+    scope = "active",
+    time_s = dplyr::n() / 10,
+    dist_m = sum(distance, na.rm = TRUE)
   )
 
 active_totals
 ```
 
 ------------------------------------------------------------------------
+
 ## 2. Visualising the summary
 
 ### Distance by velocity band
@@ -151,8 +155,8 @@ session_totals |>
   scale_fill_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
   labs(
     title = "Distance covered in each velocity band (whole session)",
-    x     = "Velocity band",
-    y     = "Distance (m)"
+    x = "Velocity band",
+    y = "Distance (m)"
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank())
@@ -169,8 +173,8 @@ session_totals |>
   scale_fill_viridis_d(option = "plasma", begin = 0.1, end = 0.9) +
   labs(
     title = "Time in each velocity band (whole session)",
-    x     = "Velocity band",
-    y     = "Duration (s)"
+    x = "Velocity band",
+    y = "Duration (s)"
   ) +
   theme_minimal() +
   theme(panel.grid = element_blank())
@@ -185,10 +189,10 @@ session_totals |>
 segment_totals <- trace |>
   quantitate(
     allocation = NULL,
-    scope      = "designation",
-    time_s     = dplyr::n() / 10,
-    dist_m     = sum(distance, na.rm = TRUE),
-    peak_vel   = round(max(velocity, na.rm = TRUE), 2)
+    scope = "designation",
+    time_s = dplyr::n() / 10,
+    dist_m = sum(distance, na.rm = TRUE),
+    peak_vel = round(max(velocity, na.rm = TRUE), 2)
   )
 
 segment_totals
@@ -209,10 +213,10 @@ pipeline record — from `initiate()` through to `quantitate()`.
 
 ## Quick reference
 
-| Argument      | Default          | Purpose                                              |
-|---------------|------------------|------------------------------------------------------|
-| `allocation`  | `"allocation_1"` | Allocation name, or `NULL` for no band grouping      |
-| `derivative`  | `"velocity"`     | Which band columns to group by (one or more)         |
-| `scope`       | `"designation"`  | `"designation"`, `"session"`, or `"active"`          |
-| `active_only` | `FALSE`          | Restrict to `active_*` segments (designation scope)  |
-| `...`         | —                | Any `dplyr::summarise()` expressions                 |
+| Argument | Default | Purpose |
+|----|----|----|
+| `allocation` | `"allocation_1"` | Allocation name, or `NULL` for no band grouping |
+| `derivative` | `"velocity"` | Which band columns to group by (one or more) |
+| `scope` | `"designation"` | `"designation"`, `"session"`, or `"active"` |
+| `active_only` | `FALSE` | Restrict to `active_*` segments (designation scope) |
+| `...` | — | Any `dplyr::summarise()` expressions |
