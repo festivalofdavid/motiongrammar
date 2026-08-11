@@ -42,7 +42,7 @@ exemplar_trace <- initiate(session = "gps_session.csv",
 
 ```r
 # Development version
-devtools::install_github("davidcorbett/motiongrammar")
+devtools::install_github("festivalofdavid/motiongrammar")
 ```
 
 **Hard dependencies (installed automatically):** dplyr, tibble, readr, stringr, lubridate, sf, zoo, changepoint, httr2, jsonlite, purrr, stringdist, tidyr, uuid, rlang, vctrs
