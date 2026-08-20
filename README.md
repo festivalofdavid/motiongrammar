@@ -191,4 +191,4 @@ saveRDS(attr(trace, "quality"), "quality_log.rds")
 
 - `?initiate`, `?quality_report`, etc. for function docs
 - `vignette("quickstart", package = "motiongrammar")` for end-to-end walkthrough
-- File issues at <https://github.com/davidcorbett/motiongrammar/issues>
+- File issues at <https://github.com/festivalofdavid/motiongrammar/issues>
