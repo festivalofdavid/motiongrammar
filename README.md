@@ -85,7 +85,7 @@ devtools::install_github("festivalofdavid/motiongrammar")
 - Adds `is_interpolated` (logical) column — marks every row that was filled rather than observed
 - Quality log records: gaps found, gap lengths, % rows interpolated, NAs filled per coordinate, passthrough columns interpolated vs skipped
 
-### 4. `filtrate()` — noise attenutation
+### 4. `filtrate()` — noise attenuation
 
 - Applies a digital filter to remove measurement noise from position or derivative signals
 - `target = 'coordinates'` filters `x`/`y`; `target = 'derivatives'` filters velocity, acceleration, angular_velocity
