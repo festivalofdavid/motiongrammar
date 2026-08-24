@@ -9,3 +9,7 @@ docs/*
 vignettes/erticles/*
 *.yml
 motiongrammar_review.txt
+.DS_Store
+.Rhistory
+quality_log.rds
+session_processed.rds
