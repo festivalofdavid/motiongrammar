@@ -42,7 +42,7 @@ exemplar_trace <- initiate(session = "gps_session.csv",
 
 ```r
 # Development version
-devtools::install_github("davidcorbett/motiongrammar")
+devtools::install_github("festivalofdavid/motiongrammar")
 ```
 
 **Hard dependencies (installed automatically):** dplyr, tibble, readr, stringr, lubridate, sf, zoo, changepoint, httr2, jsonlite, purrr, stringdist, tidyr, uuid, rlang, vctrs
@@ -191,4 +191,4 @@ saveRDS(attr(trace, "quality"), "quality_log.rds")
 
 - `?initiate`, `?quality_report`, etc. for function docs
 - `vignette("quickstart", package = "motiongrammar")` for end-to-end walkthrough
-- File issues at <https://github.com/davidcorbett/motiongrammar/issues>
+- File issues at <https://github.com/festivalofdavid/motiongrammar/issues>
