@@ -5,10 +5,10 @@
 
 ## Overview
 
-- **What it does** — loads raw human tracking data (GPS, RFID, optical), processes it through a structured nine-step pipeline, and returns tidy summary tables
-- **Why it exists** — existing tools treat each processing step as a separate script with no shared state; motiongrammar chains them into a single pipe-friendly workflow and keeps a full audit log throughout
-- **Core object** — every step passes a `motion_trace`: a tibble with two extra attributes, `metadata` (device/session info) and `quality` (provenance log), that survive every operation
-- **Philosophy** — tidyverse-first; every function accepts a `motion_trace` on the left and returns one on the right, so the entire pipeline chains with `|>`
+- **What it does**: takes tracking data (GPS, RFID, optical) from csv, gpx files and API's, processes it through a structured nine-step pipeline, returning tidy summary tables.
+- **Goal**: processing tracking data is currently disjointed and relies on many packages. Here, we unite these complex into a tidy pipeline that is easier to learn and implement.
+- **Core object**: we view tracking data as a `motion_trace` class. This is a tibble with two extra attributes, `metadata` (device/session info) and `quality` (provenance log), that survive every operation. This is a key boon for reproducibility in the academic world, as we can save every operation performed on the data through to the end.
+- **Philosophy** — tidyverse; every function accepts a `motion_trace` on the left and returns one on the right, so the entire pipeline chains with `|>`
 
 ---
 
@@ -66,8 +66,8 @@ devtools::install_github("festivalofdavid/motiongrammar")
 - `set_metadata()` — attach player name, session date, sport, or any custom field
 - Supported coordinate systems: GPS (`lat`/`lng`), local XY, local XYZ
 - Quality log records: row count, column completeness, temporal gap count, duplicate timestamps, detected Hz, device metadata
-
-### 2. `coordinate()` — project to metres
+- NB -- Strava has changed their API since this package was written. The current process should work in the meantime, but I am still working out how to incorporate their new model.
+### 2. `coordinate()` — project from spherical system to xy, and between imperial and metric systems
 
 - Converts spherical GPS degrees to a flat Cartesian plane (metres)
 - `norm = TRUE` — translates origin to the first valid position
@@ -85,7 +85,7 @@ devtools::install_github("festivalofdavid/motiongrammar")
 - Adds `is_interpolated` (logical) column — marks every row that was filled rather than observed
 - Quality log records: gaps found, gap lengths, % rows interpolated, NAs filled per coordinate, passthrough columns interpolated vs skipped
 
-### 4. `filtrate()` — remove noise
+### 4. `filtrate()` — noise attenutation
 
 - Applies a digital filter to remove measurement noise from position or derivative signals
 - `target = 'coordinates'` filters `x`/`y`; `target = 'derivatives'` filters velocity, acceleration, angular_velocity
@@ -93,7 +93,7 @@ devtools::install_github("festivalofdavid/motiongrammar")
 - Filtered signal stored in `f_x`/`f_y` columns; originals untouched — downstream steps use filtered by default
 - `filtrate_cutoff()` — diagnostic: sweeps a cutoff range and plots residuals to find the elbow; returns suggested cutoff
 - Quality log records: method, cutoff used, pass number (multiple passes supported)
-- Note: many vendor files are pre-filtered; if the residual plot shows no elbow, skip this step
+- NB: many vendor files are pre-filtered; if the residual plot shows no elbow, skip this step
 
 ### 5. `derivate()` — compute derivatives
 
